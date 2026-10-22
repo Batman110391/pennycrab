@@ -37,8 +37,9 @@ const isGuarded = (a: Agent) => a.status === 'handover'
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 const tierOfName = (model: string): Tier => (['haiku', 'sonnet', 'opus', 'fable'] as const).find(t => model.includes(t)) ?? 'other'
+const TRIP: Record<NonNullable<Agent['trip']>, string> = { budget: '⚑ over budget', 'haiku-context': '⚑ past 100K' }
 const meta = (a: Agent) =>
-  [a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
+  [isGuarded(a) && a.trip && TRIP[a.trip], a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
 // --- desktop: one SVG per row, because the desktop lays sibling elements out on separate lines.
 

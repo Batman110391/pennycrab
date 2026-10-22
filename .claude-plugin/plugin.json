@@ -10,6 +10,13 @@
       "description": "prudent: Explore and general-purpose run on Sonnet when your session runs on Opus or Fable. aggressive: Explore runs on Haiku at low effort. off: subagents inherit your model.",
       "options": ["prudent", "aggressive", "off"],
       "default": "prudent"
+    },
+    "budget": {
+      "type": "string",
+      "title": "Subagent budget (USD)",
+      "description": "The most one subagent may spend before the guard asks it to hand back what it found; a Haiku subagent is handed over too once its context passes 100K tokens, where it bills at its long-prompt rate. off: no guard.",
+      "options": ["0.50", "1", "2", "5", "off"],
+      "default": "2"
     }
   }
 }

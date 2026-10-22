@@ -1,5 +1,7 @@
 import type { Register } from 'claude-code'
 
+import { answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
+import type { Budget } from './guard'
 import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
 import { addAgent, finish, recordStep, setTool } from './telemetry'
@@ -9,6 +11,7 @@ import { onSpawnUi, renderBand, renderPane, tick, togglePane } from './ui'
 // Every hook fails open: on an error the engine's own behaviour goes on.
 export const register: Register = (on, options) => {
   const mode = (options.router as RouterMode | undefined) ?? 'prudent'
+  const budgetUsd = budgetOf(options.budget as Budget | undefined)
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
@@ -22,7 +25,7 @@ export const register: Register = (on, options) => {
 
   // Nothing on screen says how a closed pane comes back, so the close says it.
   on('ui.close', ($, e, next) => {
-    if (e.id === 'pennycrab' && e.origin === 'person') $.ui.toast('Pennycrab closed. Type /pennycrab to bring it back.')
+    if (e.id === 'pennycrab' && e.origin.kind === 'person') $.ui.toast('Pennycrab closed. Type /pennycrab to bring it back.')
     return next(e)
   })
 
@@ -38,14 +41,21 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
+    const stop = await stopOf($, e.agentId, budgetUsd)
+    if (stop !== undefined) return yield* answerAlone(e, stop)
     const result = yield* next(withRoutedEffort(e))
-    if (result.usage) await recordStep($, e.agentId, e.model, result.usage)
+    if (result.usage) {
+      await recordStep($, e.agentId, e.model, result.usage)
+      await guardStep($, e.agentId, budgetUsd)
+    }
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     const id = e.agentId
     if (id === undefined) return next(e)
+    const deny = await denyOf($, id, budgetUsd)
+    if (deny !== undefined) return { deny }
     await setTool($, id, e.tool)
     const ran = await next(e)
     await setTool($, id, undefined)
@@ -53,7 +63,10 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId !== undefined) await finish($, e.agentId, e.reason)
+    if (e.agentId !== undefined) {
+      await finish($, e.agentId, e.reason)
+      forget(e.agentId)
+    }
     return next(e)
   })
 }
