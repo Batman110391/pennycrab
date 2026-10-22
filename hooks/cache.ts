@@ -29,8 +29,10 @@ export function keepWarmOf(option: KeepWarm | undefined): number | undefined {
 // A ping goes out this long before the entry would lapse: the read lands at the request's start, and the
 // one-second tick or a slow reply must not make it late.
 const LEAD_MS = 45_000
-// A ping that read less than this share of the main context found the entry gone.
-const MIN_HIT = 0.5
+// A ping that had to write more than this share of the main context found the entry mostly gone. Less is the
+// norm: a fork re-sends the conversation as the transcript holds it, which can differ from how its first request
+// went out, and writes that part again once; the next turn then reads it all.
+const MAX_REWRITE = 0.5
 const PING = 'pennycrab keep-alive: this message only keeps the prompt cache warm while the person is away. Reply with the single word ok.'
 
 // The main thread's TTL, resolved in the engine's own order: FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL,
@@ -87,6 +89,9 @@ export async function onMainStep($: EngineInterface, model: string, u: Usage) {
   if (saved !== 0) await update($, savings, s => ({ ...s, usd: s.usd + saved }))
 }
 
+// Past its end the entry is gone (the computer slept, say): a ping would pay to write it all again.
+export const hasLapsed = (c: Cache, at: number) => c.ttlMs !== null && c.lastRequestAt !== null && at >= c.lastRequestAt + c.ttlMs
+
 // The time the next ping is due, or undefined while none is: a turn is open, the window is covered, or a ping
 // found nothing to keep.
 export function pingDueAt(c: Cache, windowMs: number): number | undefined {
@@ -103,6 +108,10 @@ export async function keepWarm($: EngineInterface, windowMs: number | undefined)
   const due = pingDueAt(c, windowMs)
   const at = await $.clock.now()
   if (due === undefined || at < due || c.ttlMs === null) return
+  if (hasLapsed(c, at)) {
+    await update($, cache, v => ({ ...v, isHalted: true }))
+    return
+  }
   isPinging = true
   try {
     const m = await read($, main)
@@ -112,11 +121,12 @@ export async function keepWarm($: EngineInterface, windowMs: number | undefined)
       return
     }
     const usd = costOf(m.model, r.usage, ttlName(c.ttlMs)) ?? 0
-    const isHit = r.usage.cache_read_input_tokens >= m.contextTokens * MIN_HIT
+    // Read or written, the whole prefix is in the cache now; a ping that wrote most of it stops the pings.
+    const isMiss = r.usage.cache_creation_input_tokens > m.contextTokens * MAX_REWRITE
     await update($, cache, v => ({
       ...v,
-      lastRequestAt: isHit ? at : v.lastRequestAt,
-      isHalted: !isHit,
+      lastRequestAt: at,
+      isHalted: isMiss,
       stretchPings: v.stretchPings + 1,
       stretchUsd: v.stretchUsd + usd,
       pings: v.pings + 1,

@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On, SessionRateLimit, TurnUsage } from 'claude-code'
 
 import type { Cache } from '../types'
-import { keepWarmOf, pingDueAt } from './cache'
+import { hasLapsed, keepWarmOf, pingDueAt } from './cache'
 import { cacheLine } from './ui'
 import { NO_CACHE } from './state'
 
@@ -23,6 +23,11 @@ test('a ping is due 45s before a 5-minute entry lapses, and never while a 1-hour
   expect(pingDueAt({ ...idle, isTurnOpen: true }, 30 * MIN)).toBeUndefined()
   expect(pingDueAt({ ...idle, isHalted: true }, 30 * MIN)).toBeUndefined()
   expect(pingDueAt({ ...idle, ttlMs: null }, 30 * MIN)).toBeUndefined()
+})
+
+test('an entry past its end has lapsed: no ping is sent into it', () => {
+  const c: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, lastRequestAt: T0, lastTurnAt: T0 }
+  expect([hasLapsed(c, T0 + 5 * MIN - 1), hasLapsed(c, T0 + 5 * MIN), hasLapsed({ ...c, lastRequestAt: null }, T0 + 9 * MIN)]).toEqual([false, true, false])
 })
 
 test('the cache line says how long the cache stays warm and what the pings cost', () => {
@@ -53,7 +58,7 @@ function engine(on: On, o: World = {}) {
   })
   on('model.fork', async () => {
     sent.forks++
-    return { value: { isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: sent.read, cache_creation_input_tokens: 0 } } } as never
+    return { value: { isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: sent.read, cache_creation_input_tokens: 100_000 - sent.read } } } as never
   })
   return { sent, clock }
 }
@@ -117,6 +122,15 @@ test('on a 1-hour cache a 30-minute window needs no ping', async ($: Engine, on)
   await turn($, 'm1')
   await clock.advance(30 * MIN)
   expect(sent.forks).toBe(0)
+})
+
+test('a ping that rewrites a part of the conversation goes on; one that rewrites most of it stops the pings', async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.read = 78_000
+  await clock.advance(30 * MIN)
+  expect(sent.forks).toBe(6)
 })
 
 test('a ping that finds the entry gone stops the pings until the next turn', async ($: Engine, on) => {
