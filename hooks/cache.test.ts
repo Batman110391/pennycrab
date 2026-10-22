@@ -88,6 +88,11 @@ function engine(on: On, o: World = {}) {
   return { sent, clock }
 }
 
+async function step($: Engine, id: string, index: number) {
+  const stream = $.turn.step({ turnId: id, index, model: 'claude-opus-5-5', messageCount: 1 })
+  for (;;) if ((await stream.next()).done) break
+}
+
 async function turn($: Engine, id: string) {
   await $.turn.start({ text: 'go', turnId: id })
   const stream = $.turn.step({ turnId: id, index: 0, model: 'claude-opus-5-5', messageCount: 1 })
@@ -323,21 +328,25 @@ test('after /model to another family no ping goes out: the new model has no entr
   expect(sent.forks).toBe(0)
 })
 
-test('a ping still out when the next turn\'s request goes out is counted once, as a cost', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+// Pings at 4:15 and 8:30 answer at once; the one at 12:45 answers at 12:50. The person's next turn sends its first
+// request at 12:47, which settles the first two pings, and its second at 12:50, after the late one answered.
+test('a ping still out when a turn\'s first request goes out is a cost alone: the turn\'s next request does not settle it again', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
+  await clock.advance(600_000)
   sent.forkMs = 5000
-  // The ping goes out at 4:15 and answers at 4:20; the person's next request goes out at 4:17.
-  await clock.advance(255_000)
+  await clock.advance(165_000)
   await clock.advance(2000)
-  await turn($, 'm2')
+  await $.turn.start({ text: 'back', turnId: 'm2' })
+  await step($, 'm2', 0)
   await clock.advance(3000)
-  sent.forkMs = 0
-  await clock.advance(2 * MIN)
-  await turn($, 'm3')
+  await step($, 'm2', 1)
+  await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 'm2' })
   const summary = await paneText($, /saved/)
-  expect(summary.some(t => t.includes('saved −$0.02'))).toBe(true)
+  // One rewrite spared ($0.48), less three pings of $0.0202; settled twice it would read $0.90.
+  expect(sent.forkAt).toEqual([255_000, 510_000, 765_000])
+  expect(summary.some(t => t.includes('saved $0.42'))).toBe(true)
 })
 
 test('the cache line ends on Cache expired whenever the last redraw landed', { options: { keepWarm: 'off' } }, async ($: Engine, on) => {

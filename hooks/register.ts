@@ -66,8 +66,6 @@ export const register: Register = (on, options) => {
       await guardStep($, e.agentId, budgetUsd, result.toolUses.length > 0)
     }
     return result
-  }).catch(async function* ($, e, next) {
-    return yield* next(e)
   })
 
   on('tool.call', async ($, e, next) => {

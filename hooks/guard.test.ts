@@ -161,7 +161,7 @@ test('the session\'s cost follows its subagents\' spend, not only the main threa
   expect(summary?.startsWith('≈$2.50')).toBe(true)
 })
 
-test('a hook that fails after the model answered leaves the step as the model gave it, its stream whole and once', async ($: Engine, on) => {
+test('a hook that fails after the model answered is skipped: the step stays as the model gave it, its stream whole and once', async ($: Engine, on) => {
   await session($, on, false, true)
   const chunks: unknown[] = []
   const result = await step($, 0, chunks)

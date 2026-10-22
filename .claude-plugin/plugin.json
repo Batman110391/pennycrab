@@ -1,6 +1,6 @@
 {
   "name": "pennycrab",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
   "author": { "name": "Batman110391" },
   "repository": "https://github.com/Batman110391/pennycrab",
@@ -25,7 +25,7 @@
     "keepWarm": {
       "type": "string",
       "title": "Keep the prompt cache warm",
-      "description": "Keeps the main conversation's prompt cache warm while you are away, by a short ping just before it would expire: a ping reads the cache, at a 25th to a 40th of the price of writing it again. auto: as long as the pings of one absence cost at most a quarter of the rewrite they spare, up to 8 hours (about half an hour on a 5-minute cache, up to 8 hours on a subscription's 1-hour cache). A time: that long after your last turn. off: no pings.",
+      "description": "Keeps the main conversation's prompt cache warm while you are away, by a short ping just before it would expire: a ping reads the cache, at a 12th to an 80th of the price of writing it again, by model. auto: as long as the pings of one absence cost at most a quarter of the rewrite they spare, up to 8 hours: about 26 minutes on a 5-minute cache with the 5.5 models, one ping an hour on a subscription's 1-hour cache. A time: that long after your last turn. off: no pings.",
       "options": ["auto", "30m", "1h", "2h", "4h", "8h", "off"],
       "default": "auto"
     }

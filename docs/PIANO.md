@@ -16,7 +16,7 @@ Questo file è scritto per la **sessione locale** che riprende il lavoro sul PC 
 | Telemetria (`hooks/telemetry.ts`) | costo, contesto, tempo, strumento in uso per ogni sub-agente; da dove è stato spostato e con che effort, nella sua riga (sopravvive a un ricaricamento); un sub-agente ripreso tiene la sua spesa | finito |
 | **UI** (`hooks/ui.tsx`) | pannello, banda sopra il prompt, riga di stato, i 6 Clawd vestiti | **funziona, da rifinire: sezione 2** |
 
-Verifiche: `claude plugin test .` (88 test), `claude plugin validate . --profile directory`, controllo dei tipi con `tsc` sui tipi del motore. Ogni regola importante ha un test che fallisce se la si rompe: provato rompendo una a una le 27 correzioni della revisione (sezione 4.4), più le 11 regole di prima.
+Verifiche: `claude plugin test .` (88 test), `claude plugin validate . --profile directory`, controllo dei tipi con `tsc` sui tipi del motore. Ogni regola importante ha un test che fallisce se la si rompe: provato rompendo una a una le 26 correzioni della revisione (sezione 4.4), più le 11 regole di prima.
 
 ## 2. Brief per la sessione locale: la UI
 
@@ -138,7 +138,7 @@ La prova da 65 minuti è il caso che conta per chi ha un abbonamento: la cache d
 - **Explore**: gira sul modello della sessione; con Fable gira su Opus.
 - **`$.model.fork` che fallisce** (429, 529, interruzione) risponde con `usage` a zero: va distinto da un ping riuscito guardando i token letti e scritti, non la presenza di `usage`.
 - **Un sub-agente ripreso** (SendMessage) ripassa da `agent.spawn` con `e.resume` e lo stesso id: la sua riga va ripresa, non rifatta.
-- **`.catch` su `turn.step`** è un generatore: se l'hook fallisce dopo la risposta del modello, `yield* next(e)` restituisce lo stream intero, una volta sola (c'è un test).
+- **Un hook di `turn.step` che fallisce** dopo la risposta del modello viene saltato e lo stream arriva intero, una volta sola (c'è un test): un `.catch` lì non aggiunge nulla.
 - **`$.session.usage().cost`** è il costo dell'intera sessione, sub-agenti e ping compresi; `$.session.model()` è il modello come lo mostra `/model`.
 - **Kit di test**: gli hook vanno registrati prima della prima chiamata a `$`; le risposte finte alle chiamate su `$` sono `{ value }`; il valore finale di uno stream si legge con `next()`; un `advance` dell'orologio risolve al massimo 10.000 attese; un test lungo chiede `timeoutMs`; `clock.sleep(ms)` in un hook finto fa rispondere il motore in ritardo; `$.command.run` lancia un comando.
 
@@ -171,7 +171,6 @@ Corretto, ogni voce con il suo test:
 | Sub-agenti | un Explore sotto Fable contava il risparmio rispetto a Fable, ma senza pennycrab girerebbe su Opus | rispetto a Opus |
 | Sub-agenti | Mythos non veniva instradato; le righe dei teammate potevano sparire | Mythos come Fable; i teammate restano |
 | Prezzi | una sessione partita senza rete restava senza prezzi (e senza guardiano) fino alla fine | riprova ogni 10 minuti |
-| Passi | `turn.step` non aveva `.catch` | ce l'ha, lo stream resta intero |
 | UI | `/pennycrab`, ondate parallele, schermo principale del terminale, perdite in verde, `?`, riga della cache bloccata, ×N, banda ridisegnata ogni secondo, spazi compattati, `esc()` senza test | vedi la fine della 2.5 |
 
 Segnalazioni scartate dalla verifica (6): comportamenti voluti e documentati, o casi che richiedono tre coincidenze e non producono numeri sbagliati.
