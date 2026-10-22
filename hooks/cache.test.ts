@@ -5,7 +5,7 @@ import type { On, SessionRateLimit, TurnUsage } from 'claude-code'
 import type { Cache } from '../types'
 import { hasLapsed, keepWarmOf, pingDueAt } from './cache'
 import { PRICING_PAGE } from './pricing.fixture'
-import { parsePricing } from './prices'
+import { parsePricing, usePrices } from './prices'
 import { cacheLine } from './ui'
 import { NO_CACHE } from './state'
 
@@ -37,8 +37,11 @@ test('an entry past its end has lapsed: no ping is sent into it', () => {
   expect([hasLapsed(c, T0 + 5 * MIN - 1), hasLapsed(c, T0 + 5 * MIN), hasLapsed({ ...c, lastRequestAt: null }, T0 + 9 * MIN)]).toEqual([false, true, false])
 })
 
-test('the cache line says how long the cache stays warm and what the pings cost', () => {
+test('the cache line says how long the cache stays warm and what the pings cost, ? with no prices', () => {
   const c: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, lastRequestAt: T0, lastTurnAt: T0, pings: 2, pingUsd: 0.04 }
+  usePrices(undefined)
+  expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ≈?')
+  usePrices({ fetchedAt: T0, models: parsePricing(PRICING_PAGE)! })
   expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ≈$0.04')
   expect(cacheLine({ ...c, pings: 0 }, T0 + 6 * MIN)).toBe('Cache expired')
   expect(cacheLine({ ...c, isTurnOpen: true, pings: 0 }, T0)).toBe('Cache in use')
@@ -46,27 +49,41 @@ test('the cache line says how long the cache stays warm and what the pings cost'
 })
 
 // The test's hooks stand for the engine: its settings and the status line's figures, a main turn whose one request
-// answers over a 100K-token context, and a fork that reads it all from the cache.
+// answers over a 100K-token context, and a fork that reads it all from the cache. `sent` steers them: how long a
+// reply, a fork or /model's answer takes, how many forks the API refuses, what the first fork reads.
 type World = { env?: Record<string, string>; settings?: Record<string, unknown>; rateLimits?: SessionRateLimit[]; noPrices?: boolean }
 function engine(on: On, o: World = {}) {
-  const sent = { forks: 0, read: 100_000 }
+  const sent = { forks: 0, forkAt: [] as number[], read: 100_000, firstForkRead: undefined as number | undefined, model: 'claude-opus-5-5', replyMs: 0, forkMs: 0, modelMs: 0, failForks: 0 }
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, o.env ?? {})
   mock.store(on, o.noPrices ? {} : { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
   on('settings.read', async () => ({ value: o.settings ?? {} }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: o.rateLimits ?? [], cost: { usd: 0 } } }) as never)
+  on('session.model', async () => {
+    if (sent.modelMs) await clock.sleep(sent.modelMs)
+    return { value: sent.model } as never
+  })
   on('command.register', async () => ({ value: undefined }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', async () => ({ text: '' }))
   on('turn.step', async function* (_$, e) {
+    if (sent.replyMs) await clock.sleep(sent.replyMs)
     const usage: TurnUsage = { model: 'claude-opus-5-5', input_tokens: 10, output_tokens: 50, cache_read_input_tokens: sent.read, cache_creation_input_tokens: 100_000 - sent.read }
     yield { kind: 'stop', stopReason: 'end_turn', usage }
     return { turnId: e.turnId, index: e.index, answer: 'done', toolUses: [], stopReason: 'end_turn', usage }
   })
   on('model.fork', async () => {
     sent.forks++
-    return { value: { isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: sent.read, cache_creation_input_tokens: 100_000 - sent.read } } } as never
+    sent.forkAt.push(clock.now() - T0)
+    if (sent.forkMs) await clock.sleep(sent.forkMs)
+    if (sent.failForks > 0) {
+      sent.failForks--
+      const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+      return { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage } } as never
+    }
+    const read = sent.forks === 1 && sent.firstForkRead !== undefined ? sent.firstForkRead : sent.read
+    return { value: { isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: read, cache_creation_input_tokens: 100_000 - read } } } as never
   })
   return { sent, clock }
 }
@@ -243,4 +260,96 @@ test('a subscription past its limits is told so, with the 5-minute cache it then
   await start($)
   await turn($, 'm1')
   expect(toasts[0]).toContain('set for your Claude subscription, past its limits: 5-minute cache')
+})
+
+test('the entry lives from the request\'s start: after a reply that streamed for a minute, the ping still lands 45s before the lapse', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  sent.replyMs = MIN
+  const t = turn($, 'm1')
+  await clock.settle()
+  await clock.advance(MIN)
+  await t
+  await clock.advance(5 * MIN)
+  expect(sent.forkAt[0]).toBe(5 * MIN - 45_000)
+})
+
+test('a ping the API refuses renews nothing: it is tried again 15s later', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.failForks = 1
+  await clock.advance(5 * MIN)
+  expect(sent.forkAt).toEqual([255_000, 270_000])
+  expect(await paneText($, /^Cache /)).toEqual(['Cache warm · 5m left · 1 ping ≈$0.02'])
+})
+
+test('a ping refused each time stops once the entry has lapsed, and none counts', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.failForks = 99
+  await clock.advance(10 * MIN)
+  expect(sent.forkAt).toEqual([255_000, 270_000, 285_000])
+  expect(await paneText($, /^Cache /)).toEqual(['Cache expired'])
+})
+
+test('a slow answer from the engine does not let a second ping go out beside the first', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.modelMs = 2500
+  await clock.advance(5 * MIN)
+  expect(sent.forks).toBe(1)
+})
+
+// A first ping that rewrote 10K tokens costs $0.068; the next ones read for $0.020. Weighed as reads, three fit in
+// the quarter ($0.12) of the $0.48 rewrite; weighed as the average so far, one would.
+test('auto weighs the next ping as a read: a first ping that rewrote a part of the context leaves room for more', async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.firstForkRead = 90_000
+  await clock.advance(60 * MIN)
+  expect(sent.forks).toBe(3)
+})
+
+test('after /model to another family no ping goes out: the new model has no entry to keep', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.model = 'claude-sonnet-5-5'
+  await clock.advance(30 * MIN)
+  expect(sent.forks).toBe(0)
+})
+
+test('a ping still out when the next turn\'s request goes out is counted once, as a cost', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  sent.forkMs = 5000
+  // The ping goes out at 4:15 and answers at 4:20; the person's next request goes out at 4:17.
+  await clock.advance(255_000)
+  await clock.advance(2000)
+  await turn($, 'm2')
+  await clock.advance(3000)
+  sent.forkMs = 0
+  await clock.advance(2 * MIN)
+  await turn($, 'm3')
+  const summary = await paneText($, /saved/)
+  expect(summary.some(t => t.includes('saved −$0.02'))).toBe(true)
+})
+
+test('the cache line ends on Cache expired whenever the last redraw landed', { options: { keepWarm: 'off' } }, async ($: Engine, on) => {
+  const { clock } = engine(on)
+  on('ui.panes', async () => ({ value: [] }) as never)
+  on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
+  await start($)
+  await clock.set(T0 + 500)
+  await turn($, 'm1')
+  // /pennycrab redraws at 4:59.7 after the request, 0.3s before the entry lapses, between two ticks.
+  await clock.set(T0 + 300_200)
+  await $.command.run({ command: 'pennycrab', args: '' } as never)
+  await clock.advance(10 * MIN)
+  expect(await paneText($, /^Cache /)).toEqual(['Cache expired'])
 })

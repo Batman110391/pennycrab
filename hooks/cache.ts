@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { Cache } from '../types'
-import { costOf } from './prices'
+import { costOf, tierOf } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS } from './state'
 
 // The state lib's scan reads an atom only where its reference is written, so each file declares the ones it uses.
@@ -82,17 +82,16 @@ function rewriteOf(model: string, tokens: number, ttl: Ttl) {
   return write === undefined || readUsd === undefined ? 0 : write - readUsd
 }
 
-// Each real request of the main thread: the entry lives on from here. The first after pings settles them: where
-// the entry would have lapsed without them, what it read from the cache is a re-write spared.
-export async function onMainStep($: EngineInterface, model: string, u: Usage) {
-  const at = await $.clock.now()
+// Each real request of the main thread, `sentAt` its start: the entry lives on from there. The first after pings
+// settles them: where the entry would have lapsed without them, what it read from the cache is a re-write spared.
+export async function onMainStep($: EngineInterface, model: string, u: Usage, sentAt: number) {
   const c = await read($, cache)
   let saved = 0
   if (c.stretchPings > 0) {
-    const wouldLapse = c.ttlMs !== null && c.lastTurnAt !== null && at - c.lastTurnAt > c.ttlMs
+    const wouldLapse = c.ttlMs !== null && c.lastTurnAt !== null && sentAt - c.lastTurnAt > c.ttlMs
     saved = (wouldLapse && c.ttlMs !== null ? rewriteOf(model, u.cache_read_input_tokens, ttlName(c.ttlMs)) : 0) - c.stretchUsd
   }
-  await update($, cache, v => ({ ...v, lastRequestAt: at, stretchPings: 0, stretchUsd: 0, savedUsd: v.savedUsd + saved }))
+  await update($, cache, v => ({ ...v, lastRequestAt: sentAt, stretchPings: 0, stretchUsd: 0, savedUsd: v.savedUsd + saved }))
   if (saved !== 0) await update($, savings, s => ({ ...s, usd: s.usd + saved }))
 }
 
@@ -107,48 +106,62 @@ export function pingDueAt(c: Cache, windowMs: number): number | undefined {
   return lapsesAt >= c.lastTurnAt + windowMs ? undefined : lapsesAt - LEAD_MS
 }
 
-// Under `auto`, whether one more ping still pays: what this absence's pings would then cost against a quarter of
-// the rewrite they spare. Without prices nothing can be weighed, and no ping goes out.
+// Under `auto`, whether one more ping still pays: this absence's pings so far, and the next one, which reads the
+// context from the cache, against a quarter of the rewrite they spare. The first ping after a turn can write a
+// part of the context again (see MAX_REWRITE), so it can cost more than that quarter alone. Without prices
+// nothing can be weighed, and no ping goes out.
 function isWorthAnother(c: Cache, model: string, contextTokens: number, ttl: Ttl) {
   const rewrite = rewriteOf(model, contextTokens, ttl)
-  const none = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0 }
-  const next = c.stretchPings > 0 ? c.stretchUsd / c.stretchPings : costOf(model, { ...none, cache_read_input_tokens: contextTokens }, ttl)
+  const next = costOf(model, { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens }, ttl)
   return rewrite > 0 && next !== undefined && c.stretchUsd + next <= rewrite * AUTO_SHARE
 }
 
+// A ping that reached no cache (an API error, an abort) is tried again this much later, until the entry lapses.
+const RETRY_MS = 15_000
+let retryAt = 0
 let isPinging = false
 // Each second: once a ping is due, one fork of the main thread reads its cache, which renews the entry.
 export async function keepWarm($: EngineInterface, policy: WarmPolicy | undefined) {
+  // Claimed before the first wait, so a slow tick cannot send a second ping beside it.
   if (policy === undefined || isPinging) return
-  const c = await read($, cache)
-  const due = pingDueAt(c, policy.windowMs)
-  const at = await $.clock.now()
-  if (due === undefined || at < due || c.ttlMs === null) return
-  const m = await read($, main)
-  if (hasLapsed(c, at) || (policy.isAuto && !isWorthAnother(c, m.model, m.contextTokens, ttlName(c.ttlMs)))) {
-    await update($, cache, v => ({ ...v, isHalted: true }))
-    return
-  }
   isPinging = true
   try {
-    const r = await $.model.fork({ prompt: PING })
-    if (!('usage' in r)) {
-      await update($, cache, v => ({ ...v, isHalted: true }))
-      return
-    }
-    const usd = costOf(m.model, r.usage, ttlName(c.ttlMs)) ?? 0
-    // Read or written, the whole prefix is in the cache now; a ping that wrote most of it stops the pings.
-    const isMiss = r.usage.cache_creation_input_tokens > m.contextTokens * MAX_REWRITE
-    await update($, cache, v => ({
-      ...v,
-      lastRequestAt: at,
-      isHalted: isMiss,
-      stretchPings: v.stretchPings + 1,
-      stretchUsd: v.stretchUsd + usd,
-      pings: v.pings + 1,
-      pingUsd: v.pingUsd + usd,
-    }))
+    await pingIfDue($, policy)
   } finally {
     isPinging = false
   }
+}
+
+async function pingIfDue($: EngineInterface, policy: WarmPolicy) {
+  const c = await read($, cache)
+  const due = pingDueAt(c, policy.windowMs)
+  const at = await $.clock.now()
+  if (due === undefined || at < Math.max(due, retryAt) || c.ttlMs === null) return
+  const m = await read($, main)
+  const halt = () => update($, cache, v => ({ ...v, isHalted: true }))
+  if (hasLapsed(c, at) || (policy.isAuto && !isWorthAnother(c, m.model, m.contextTokens, ttlName(c.ttlMs)))) return halt()
+  // After /model the fork runs on the new model, which has no entry: it would write the whole prefix for nothing.
+  const [was, is] = [tierOf(m.model), tierOf(await $.session.model())]
+  if (was !== 'other' && is !== 'other' && was !== is) return halt()
+  const r = await $.model.fork({ prompt: PING })
+  if (!('usage' in r)) return halt()
+  if (r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens === 0) {
+    retryAt = at + RETRY_MS
+    return
+  }
+  const usd = costOf(m.model, r.usage, ttlName(c.ttlMs)) ?? 0
+  // Read or written, the whole prefix is in the cache now; a ping that wrote most of it stops the pings.
+  const isMiss = r.usage.cache_creation_input_tokens > m.contextTokens * MAX_REWRITE
+  // A request of a new turn that went out meanwhile settled the stretch without this ping: it is a cost alone.
+  let isLate = false
+  await update($, cache, v => {
+    isLate = v.lastRequestAt !== c.lastRequestAt
+    const counted = { ...v, pings: v.pings + 1, pingUsd: v.pingUsd + usd }
+    return isLate
+      ? { ...counted, savedUsd: v.savedUsd - usd }
+      : { ...counted, lastRequestAt: at, isHalted: isMiss, stretchPings: v.stretchPings + 1, stretchUsd: v.stretchUsd + usd }
+  })
+  if (isLate && usd > 0) await update($, savings, s => ({ ...s, usd: s.usd - usd }))
+  const s = await $.session.usage()
+  await update($, main, v => ({ ...v, costUsd: s.cost?.usd ?? v.costUsd }))
 }

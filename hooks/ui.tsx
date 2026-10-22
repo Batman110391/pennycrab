@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 
-import type { Agent, Cache, Tier } from '../types'
-import { priceBook } from './prices'
+import type { Agent, Cache, Main, Tier } from '../types'
+import { priceBook, tierOf } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
 export const PANE = 'pennycrab'
@@ -28,10 +28,13 @@ const GLYPH: Record<Agent['status'], string> = { running: '●', tool: '●', ha
 
 // --- numbers
 
-export const fmtUsd = (n: number) => (n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+// A loss reads with its sign first: −$0.02.
+export const fmtUsd = (n: number): string => (n < 0 ? `−${fmtUsd(-n)}` : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
 // A figure priced from the pricing page; '?' while no prices were ever fetched. The session's own cost comes
 // from the engine and needs none.
 const fmtPriced = (n: number) => (priceBook() ? fmtUsd(n) : '?')
+// A row's cost; '?' once a request of it ran on a model the page does not list.
+const fmtCost = (a: Agent) => (a.isUnpriced ? '?' : fmtUsd(a.costUsd))
 export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${n}`)
 export function fmtTime(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -43,10 +46,9 @@ const isLive = (a: Agent) => a.endedAt === undefined
 const isGuarded = (a: Agent) => a.status === 'handover'
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
-const tierOfName = (model: string): Tier => (['haiku', 'sonnet', 'opus', 'fable'] as const).find(t => model.includes(t)) ?? 'other'
 const tripLabel = (a: Agent) => (a.trip === 'budget' ? '⚑ over budget' : undefined)
 const meta = (a: Agent) =>
-  [isGuarded(a) && tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
+  [isGuarded(a) && tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOf(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
 // --- desktop: one SVG per row, because the desktop lays sibling elements out on separate lines.
 
@@ -211,7 +213,7 @@ function headSvg(w: number, cost: number, saved: number, mainPct: number) {
     const x = i * (cw + gap)
     return `<rect class="card" x="${x}" y="1" width="${cw}" height="42" rx="10"/>${label(x + 10, 17, 11, 'dim', name)}${label(x + 10, 35, 15, fill ? '' : 'fg', value, ` font-weight="600"${fill ? ` fill="${fill}"` : ''}`)}`
   }
-  return svg(w, HEAD_H, card(0, 'Cost', `≈${fmtUsd(cost)}`) + card(1, 'Saved', fmtPriced(saved), GOOD) + card(2, 'Main context', `${mainPct}%`))
+  return svg(w, HEAD_H, card(0, 'Cost', `≈${fmtUsd(cost)}`) + card(1, 'Saved', fmtPriced(saved), saved > 0 ? GOOD : undefined) + card(2, 'Main context', `${mainPct}%`))
 }
 
 // Top right of a row: a pulsing dot while it works, a tick once done, a cross when it failed or stopped.
@@ -235,7 +237,7 @@ function rowSvg(w: number, a: Agent, at: number) {
     crab(2, 15, costumeOf(a), isLive(a), 2.4) +
       label(x, 18, 13, 'fg', clip(a.description || a.type, 13, tw), ' font-weight="600"') +
       `<text x="${x}" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${NAME[a.tier]}</tspan><tspan class="dim">${esc(info ? ` · ${clip(info, 11, tw - 50)}` : '')}</tspan></text>` +
-      label(x + tw, 49, 11, 'dim', `ctx ${ctx}% · ${fmtTokens(a.contextTokens)}   ≈${fmtPriced(a.costUsd)}   ${fmtTime(elapsed(a, at))}`, ' text-anchor="end"') +
+      label(x + tw, 49, 11, 'dim', `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`, ' text-anchor="end"') +
       `<rect class="track" x="${x}" y="55" width="${tw}" height="4" rx="2"/><rect x="${x}" y="55" width="${Math.round((tw * ctx) / 100)}" height="4" rx="2" fill="${isGuarded(a) ? WARN : color}"/>` +
       mark(w - 8, 15, a, color) +
       `<line class="rule" x1="0" y1="65.5" x2="${w}" y2="65.5"/>`,
@@ -258,9 +260,12 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
 
 // The band: crabs at work, how many, the main thread's context and the savings.
 const BAND_H = 24
-function bandSvg(w: number, live: Agent[], mainPct: number, saved: number) {
+const runningText = (live: Agent[]) => {
   const guarded = live.filter(isGuarded).length
-  const text = `${live.length - guarded} running${guarded ? ` · ${guarded} handover` : ''}`
+  return `${live.length - guarded} running${guarded ? ` · ${guarded} handover` : ''}`
+}
+function bandSvg(w: number, live: Agent[], mainPct: number, saved: number) {
+  const text = runningText(live)
   const crabs = Math.min(live.length, 5)
   const tx = crabs * 27 + 6
   const right = saved > 0 ? `saved ${fmtUsd(saved)}` : ''
@@ -293,12 +298,16 @@ export function cacheLine(c: Cache, at: number) {
   const mins = Math.ceil(left / 60_000)
   const leftText = mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
   const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${leftText} left` : 'Cache expired'
-  const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtUsd(c.pingUsd)}` : ''
+  const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtPriced(c.pingUsd)}` : ''
   return state + pings
 }
-// The line's minutes move on while the person is away: until a tick after the entry lapses.
-const isCacheCounting = (c: Cache, at: number) =>
-  !c.isTurnOpen && c.ttlMs !== null && c.lastRequestAt !== null && at <= c.lastRequestAt + c.ttlMs + CACHE_TICK_MS
+// The line's minutes move on while the person is away, every CACHE_TICK_MS, until the drawings' time `shown`
+// reaches the entry's lapse, so that it ends on 'Cache expired' whenever the ticks land.
+const isCacheCounting = (c: Cache, shown: number, at: number) => {
+  if (c.isTurnOpen || c.ttlMs === null || c.lastRequestAt === null) return false
+  const lapse = c.lastRequestAt + c.ttlMs
+  return shown < lapse && (at - shown >= CACHE_TICK_MS || at >= lapse)
+}
 
 // --- what the hooks call
 
@@ -309,11 +318,12 @@ async function view($: EngineInterface) {
   const u = await read($, ui)
   const c = await read($, cache)
   const at = Math.max(await read($, now), ...list.map(a => a.startedAt), c.lastRequestAt ?? 0, 0)
-  const mainPct = m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0
-  return { list, m, s, u, at, mainPct, cacheText: cacheLine(c, at) }
+  return { list, m, s, u, at, mainPct: pctOf(m), cacheText: cacheLine(c, at) }
 }
+const pctOf = (m: Main) => (m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0)
 
 export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
+  noteViewport(e)
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
   const { list, m, s, u, at, mainPct, cacheText } = await view($)
@@ -379,7 +389,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Text wrap="truncate-end">
         {'  '}
         <Text color={isGuarded(a) ? WARN : COLOR[a.tier]}>{textBar(ctxOf(a), barW)}</Text>
-        <Text dimColor>{` ctx ${ctxOf(a)}% · ${fmtTokens(a.contextTokens)} ≈${fmtPriced(a.costUsd)} ${fmtTime(elapsed(a, at))}`}</Text>
+        <Text dimColor>{` ctx ${ctxOf(a)}% · ${fmtTokens(a.contextTokens)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`}</Text>
       </Text>
     </Box>
   )
@@ -411,9 +421,15 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   )
 }
 
-// The band shows while subagents run; other mods' bands stay beneath it.
+// The band shows while subagents run; other mods' bands stay beneath it. It draws nothing that moves with time,
+// so it reads neither the clock nor the cache, and is not redrawn each second.
 export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>, next: (e: RenderInput<'AbovePrompt'>) => Promise<RenderElement>) {
-  const { list, s, u, mainPct } = await view($)
+  noteViewport(e)
+  const list = await read($, agents)
+  const m = await read($, main)
+  const s = await read($, savings)
+  const u = await read($, ui)
+  const mainPct = pctOf(m)
   const live = list.filter(isLive)
   if (live.length === 0 || u.isBandHidden || e.props.hasSurvey) return next(e)
   // The engine's own empty band ({ type: 'engine' }) must not end up inside ours: the desktop then drops the whole band.
@@ -422,7 +438,7 @@ export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt
 
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const crew = <Button key="pennycrab-crew" plain label={`×${list.length}`} onPress={() => void togglePane($)} />
+  const crew = <Button key="pennycrab-crew" plain label={`×${live.length}`} onPress={() => void togglePane($)} />
   const hide = <Button key="pennycrab-hide" plain role="dismiss" label="✕" onPress={() => update($, ui, v => ({ ...v, isBandHidden: true }))} />
 
   // The terminal also lists an Svg, which draws nothing there, so the surface is checked as well.
@@ -451,7 +467,7 @@ export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt
             <Text key={a.id} color={isGuarded(a) ? WARN : COLOR[a.tier]}>▣</Text>
           ))}
         </Text>
-        <Text bold>{`${live.length} running`}</Text>
+        <Text bold>{runningText(live)}</Text>
         <Text dimColor>{`main ${textBar(mainPct, barW)} ${mainPct}%`}</Text>
         {s.usd > 0 && <Text color="green">{`saved ${fmtUsd(s.usd)}`}</Text>}
         {crew}
@@ -476,15 +492,16 @@ let shownStatus: string | undefined
 export async function tick($: EngineInterface) {
   const list = await read($, agents)
   const at = await $.clock.now()
-  const isCounting = isCacheCounting(await read($, cache), at) && at - (await read($, now)) >= CACHE_TICK_MS
+  const isCounting = isCacheCounting(await read($, cache), await read($, now), at)
   if (list.some(isLive) || isCounting) await update($, now, () => at)
   const line = statusLine(list, (await read($, savings)).usd, at)
   if (line !== shownStatus) $.ui.status((shownStatus = line))
 }
 
-// Opens the pane, or closes it when it is up; true when it ends up open.
+// Opens the pane, or closes it when it is drawn; true when it ends up open. One opened unasked that waits
+// undrawn for room is opened again, now asked.
 export async function togglePane($: EngineInterface) {
-  if ((await $.ui.panes()).some(p => p.id === PANE)) {
+  if ((await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)) {
     await $.ui.close({ id: PANE })
     return false
   }
@@ -494,13 +511,21 @@ export async function togglePane($: EngineInterface) {
   return true
 }
 
-// A new subagent brings the band back. The first of a wave (none other running) opens the pane: closed
-// during a wave, it stays closed until the next one.
-export async function onSpawnUi($: EngineInterface) {
-  const isNewWave = (await read($, agents)).filter(isLive).length === 1
+// Whether each surface that drew may dock a pane beside the transcript: false where it said it places one inline
+// above the prompt (the terminal's main screen), true where it said it docks or has not said. Unasked, the pane
+// opens only where it would be a sidebar, not inline on top of the band that already shows the crabs.
+const docks = new Map<string, boolean>()
+function noteViewport(e: RenderInput<'Pane'> | RenderInput<'AbovePrompt'>) {
+  docks.set(e.surface, e.viewport?.isFullscreen !== false)
+}
+const isSidebar = () => docks.size === 0 || [...docks.values()].some(Boolean)
+
+// A new subagent brings the band back. The first of a wave (`isFirst`: none other running) opens the pane:
+// closed during a wave, it stays closed until the next one.
+export async function onSpawnUi($: EngineInterface, isFirst: boolean) {
   const at = await $.clock.now()
   await update($, now, () => at)
   await update($, ui, v => ({ ...v, isBandHidden: false }))
   // The pane is a nicety: a refused open must never reach the spawn.
-  if (isNewWave) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
+  if (isFirst && isSidebar()) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
 }

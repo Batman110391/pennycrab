@@ -29,6 +29,12 @@ test('prune keeps every running agent and only the last 20 finished ones', () =>
   expect(kept.filter(a => a.id.startsWith('live')).length).toBe(2)
 })
 
+test('a teammate, which wakes again with no new spawn, keeps its row however many finish after it', () => {
+  const teammate = { ...row('mate', 1), isTeammate: true as const }
+  const finished = Array.from({ length: 25 }, (_, i) => row(`done${i}`, i + 2))
+  expect(prune([teammate, ...finished]).some(a => a.id === 'mate')).toBe(true)
+})
+
 test('a turn reason maps to the row status', () => {
   expect(statusOf('answer')).toBe('completed')
   expect(statusOf('aborted')).toBe('stopped')

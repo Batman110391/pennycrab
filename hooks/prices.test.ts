@@ -96,38 +96,50 @@ test('tierOf reads the family from an id or an alias', () => {
 // plugin's prices show through the pane: a Sonnet subagent's one step of 1M cache writes is $2.50.
 const T0 = Date.parse('2026-10-22T10:00:00Z')
 const DAY = 24 * 3600_000
-function world(on: On, stored: unknown, page: { ok: boolean; text: string } | 'down') {
+type Page = { ok: boolean; text: string } | 'down'
+function world(on: On, stored: unknown, page: Page | (() => Page)) {
   const fetched: string[] = []
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, {})
   mock.store(on, stored === undefined ? {} : { prices: stored })
   on('http.fetch', async (_$, e) => {
     fetched.push(e.url)
-    if (page === 'down') throw new Error('offline')
-    return { value: { status: page.ok ? 200 : 503, ok: page.ok, headers: {}, text: page.text } } as never
+    const p = typeof page === 'function' ? page() : page
+    if (p === 'down') throw new Error('offline')
+    return { value: { status: p.ok ? 200 : 503, ok: p.ok, headers: {}, text: p.text } } as never
   })
   on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { tokens: 0, window: 1_000_000, percent: 0 }, rateLimits: [] } }) as never)
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'a1' }) as never)
   on('turn.step', async function* (_$, e) {
-    const u: TurnUsage = { model: 'claude-sonnet-5-5', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
+    const u: TurnUsage = { model: e.model, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
     yield { kind: 'stop', stopReason: 'end_turn', usage: u }
     return { turnId: e.turnId, index: e.index, answer: 'done', toolUses: [], stopReason: 'end_turn', usage: u }
   })
   return { fetched, clock }
 }
 
-async function rowCost($: Engine, clock: { settle: () => Promise<void> }) {
+const start = async ($: Engine, clock: { settle: () => Promise<void> }) => {
   await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await clock.settle()
-  await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Look', subagentType: 'Explore', parentModel: 'claude-sonnet-5-5', background: false, fork: false } as never)
-  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' })
+}
+
+// One subagent of a `parent` session, one step on `model`: its row, and the pane's summary.
+async function pane($: Engine, model = 'claude-sonnet-5-5', parent = 'claude-sonnet-5-5') {
+  await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Look', subagentType: 'Explore', parentModel: parent, background: false, fork: false } as never)
+  const stream = $.turn.step({ turnId: 't1', index: 0, model, messageCount: 1, agentId: 'a1' })
   for (;;) if ((await stream.next()).done) break
   const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', component: 'Pane', requestId: 'pennycrab', props: { title: 'Pennycrab', isFocused: false, bodyColumns: 80, placement: 'dock' } as never })
-  const rows = (await ui.findAll({ type: 'Text', text: /ctx \d+%/ })).map(t => (t as { text?: string }).text ?? '')
+  const texts = (await ui.findAll({ type: 'Text' })).map(t => (t as { text?: string }).text ?? '')
   await ui.unmount()
-  return rows.join(' ')
+  return texts
+}
+
+async function rowCost($: Engine, clock: { settle: () => Promise<void> }, model?: string) {
+  await start($, clock)
+  return (await pane($, model)).filter(t => /ctx \d+%/.test(t)).join(' ')
 }
 
 test('with no prices kept, the session fetches the page and prices from it', async ($: Engine, on) => {
@@ -151,4 +163,29 @@ test('older prices are fetched again; with the page down or changed, the kept on
 test('with no prices kept and the page down, costs read as unknown rather than made up', async ($: Engine, on) => {
   const { clock } = world(on, undefined, 'down')
   expect(await rowCost($, clock)).toContain('≈?')
+})
+
+test('with the page down at the start, it is asked again ten minutes later, and prices from then on', async ($: Engine, on) => {
+  let page: Page = 'down'
+  const { fetched, clock } = world(on, undefined, () => page)
+  await start($, clock)
+  page = { ok: true, text: PRICING_PAGE }
+  await clock.advance(10 * 60_000)
+  const row = (await pane($)).filter(t => /ctx \d+%/.test(t)).join(' ')
+  expect(fetched.length).toBe(2)
+  expect(row).toContain('≈$2.50')
+})
+
+test('a subagent on a model the page does not list reads ?, not $0.00', async ($: Engine, on) => {
+  const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down')
+  expect(await rowCost($, clock, 'my-gateway-model')).toContain('≈?')
+})
+
+test('an Explore of a Fable session would run on Opus without pennycrab: its savings are counted against Opus', async ($: Engine, on) => {
+  const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down')
+  await start($, clock)
+  // 1M tokens written on Haiku 5.5 past its 100K line: $0.625, against $5.00 on Opus 5.5 ($12.50 on Fable).
+  const texts = await pane($, 'claude-haiku-5-5', 'claude-fable-5-1')
+  expect(texts).toContain('  Haiku · low · ↓ from Opus')
+  expect(texts.some(t => t.includes('saved $4.38'))).toBe(true)
 })

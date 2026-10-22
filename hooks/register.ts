@@ -21,7 +21,9 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
     await loadStoredPrices($)
+    // The page again every ten minutes while the kept prices are a day old or missing (no network at the start).
     void refreshPrices($).catch(() => undefined)
+    $.clock.every(10 * 60_000, () => void refreshPrices($).catch(() => undefined))
     $.clock.every(1000, () => {
       void tick($)
       void keepWarm($, warm).catch(() => undefined)
@@ -42,11 +44,8 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => renderBand($, e, next)).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
-    const started = await spawnRouted($, e, next, mode)
-    if (started.agentId !== undefined) {
-      await addAgent($, e, started.agentId, started.model)
-      await onSpawnUi($)
-    }
+    const { started, route } = await spawnRouted($, e, next, mode)
+    if (started.agentId !== undefined) await onSpawnUi($, await addAgent($, e, started.agentId, started.model, route))
     return started
   }).catch(($, e, next) => next(e))
 
@@ -58,13 +57,17 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     const stop = await stopOf($, e.agentId, budgetUsd)
     if (stop !== undefined) return yield* answerAlone(e, stop)
-    const result = yield* next(withRoutedEffort(e))
+    // The main thread's cache entry lives from the request's start, not from the end of its reply.
+    const sentAt = e.agentId === undefined ? await $.clock.now() : 0
+    const result = yield* next(await withRoutedEffort($, e))
     if (result.usage) {
       await recordStep($, e.agentId, e.model, result.usage)
-      if (e.agentId === undefined) await onMainStep($, e.model, result.usage)
+      if (e.agentId === undefined) await onMainStep($, e.model, result.usage, sentAt)
       await guardStep($, e.agentId, budgetUsd, result.toolUses.length > 0)
     }
     return result
+  }).catch(async function* ($, e, next) {
+    return yield* next(e)
   })
 
   on('tool.call', async ($, e, next) => {

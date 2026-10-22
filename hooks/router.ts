@@ -1,12 +1,19 @@
+import { atom, read } from 'claude-code'
 import type { AgentSpawnInput, AgentSpawnResult, EngineInterface, TurnStepInput } from 'claude-code'
 
 import { tierOf } from './prices'
-import { routed } from './state'
+
+// The state lib's scan reads an atom only where its reference is written, so each file declares the ones it uses.
+const agents = atom({ plugin: 'pennycrab', key: 'agents' } as const, [])
 
 export type RouterMode = 'auto' | 'prudent' | 'off'
 type Pick = { model: 'haiku' | 'sonnet'; effort?: 'low' }
+// A routed subagent: what it would have run on without pennycrab, and the effort it sets.
+export type Route = { from: string; effort?: 'low' }
 
 const RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 }
+// Mythos is priced as Fable and ranks with it.
+const rankOf = (model: string) => (/mythos/i.test(model) ? RANK.fable : RANK[tierOf(model)])
 
 // The model a built-in subagent gets instead of inheriting its parent's, or undefined to leave it.
 // auto: Explore, which only reads and searches, on Haiku at low effort (measured: the same 32 files described, at
@@ -15,7 +22,7 @@ const RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 }
 export function routeFor(mode: RouterMode, type: string, parentModel: string): Pick | undefined {
   if (mode === 'off' || (type !== 'Explore' && type !== 'general-purpose')) return undefined
   const pick: Pick = mode === 'auto' && type === 'Explore' ? { model: 'haiku', effort: 'low' } : { model: 'sonnet' }
-  const parent = RANK[tierOf(parentModel)]
+  const parent = rankOf(parentModel)
   return parent !== undefined && RANK[pick.model]! < parent ? pick : undefined
 }
 
@@ -29,23 +36,25 @@ async function isOptedOut($: EngineInterface) {
   )
 }
 
-// Starts the spawn, on a cheaper model where routeFor picks one.
+// Starts the spawn, on a cheaper model where routeFor picks one, and says where it was routed from. Without
+// pennycrab, Explore under Fable runs on Opus, so that is what its savings are counted against.
 export async function spawnRouted(
   $: EngineInterface,
   e: AgentSpawnInput,
   next: (e: AgentSpawnInput) => Promise<AgentSpawnResult>,
   mode: RouterMode,
-): Promise<AgentSpawnResult> {
+): Promise<{ started: AgentSpawnResult; route?: Route }> {
   const isPlain = e.model === undefined && !e.fork && !e.isTeammate && !e.workflow && !e.resume
   const pick = isPlain ? routeFor(mode, e.subagentType, e.parentModel) : undefined
-  if (!pick || (await isOptedOut($))) return next(e)
+  if (!pick || (await isOptedOut($))) return { started: await next(e) }
   const started = await next({ ...e, model: pick.model })
-  if (started.agentId !== undefined) routed.set(started.agentId, { from: e.parentModel, effort: pick.effort })
-  return started
+  const from = e.subagentType === 'Explore' && rankOf(e.parentModel) === RANK.fable ? 'opus' : e.parentModel
+  return { started, route: { from, effort: pick.effort } }
 }
 
-// The spawn sets no effort, so a routed agent's requests carry it.
-export function withRoutedEffort(e: TurnStepInput): TurnStepInput {
-  const effort = e.agentId === undefined ? undefined : routed.get(e.agentId)?.effort
-  return effort && e.effort !== undefined ? { ...e, effort } : e
+// The spawn sets no effort, so a routed agent's requests carry it. Read from its row, which outlives a reload.
+export async function withRoutedEffort($: EngineInterface, e: TurnStepInput): Promise<TurnStepInput> {
+  if (e.agentId === undefined || e.effort === undefined) return e
+  const effort = (await read($, agents)).find(a => a.id === e.agentId)?.effort
+  return effort ? { ...e, effort } : e
 }

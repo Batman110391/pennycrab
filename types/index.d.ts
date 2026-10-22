@@ -9,10 +9,12 @@ export type Agent = {
   type: string
   model: string
   tier: Tier
-  // The model the parent would have given it, when pennycrab routed it elsewhere.
+  // The model it would have run on without pennycrab, and the effort it sets, when pennycrab routed it.
   routedFrom?: string
-  effort?: string
+  effort?: 'low'
   background: boolean
+  // A teammate wakes again on a message, with no new spawn: its row is kept.
+  isTeammate?: true
   status: AgentStatus
   currentTool?: string
   startedAt: number
@@ -21,6 +23,8 @@ export type Agent = {
   contextTokens: number
   contextWindow: number
   costUsd: number
+  // A request on a model the pricing page does not list (or before any prices): its cost is unknown.
+  isUnpriced?: true
   savedUsd: number
   // Why the guard stopped it, once it did.
   trip?: 'budget'
@@ -35,7 +39,6 @@ export type Main = {
 
 export type Savings = {
   usd: number
-  routed: number
 }
 
 // The main thread's prompt cache, as the keep-warm sees it.
