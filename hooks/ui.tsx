@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 
 import type { Agent, Cache, Tier } from '../types'
+import { longPromptOf, priceBook } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
 export const PANE = 'pennycrab'
@@ -17,6 +18,8 @@ const now = atom({ plugin: 'pennycrab', key: 'now' } as const, 0)
 
 const COLOR: Record<Tier, string> = { haiku: '#639922', sonnet: '#378ADD', opus: '#D85A30', fable: '#7F77DD', other: '#888780' }
 const NAME: Record<Tier, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus', fable: 'Fable', other: 'Other' }
+// The status line's one letter: Other's own initial would read as Opus.
+const LETTER: Record<Tier, string> = { haiku: 'H', sonnet: 'S', opus: 'O', fable: 'F', other: '?' }
 const WARN = '#BA7517'
 const GOOD = '#3B6D11'
 const BAD = '#A32D2D'
@@ -26,6 +29,9 @@ const GLYPH: Record<Agent['status'], string> = { running: '●', tool: '●', ha
 // --- numbers
 
 export const fmtUsd = (n: number) => (n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+// A figure priced from the pricing page; '?' while no prices were ever fetched. The session's own cost comes
+// from the engine and needs none.
+const fmtPriced = (n: number) => (priceBook() ? fmtUsd(n) : '?')
 export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${n}`)
 export function fmtTime(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -38,9 +44,10 @@ const isGuarded = (a: Agent) => a.status === 'handover'
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 const tierOfName = (model: string): Tier => (['haiku', 'sonnet', 'opus', 'fable'] as const).find(t => model.includes(t)) ?? 'other'
-const TRIP: Record<NonNullable<Agent['trip']>, string> = { budget: '⚑ over budget', 'haiku-context': '⚑ past 100K' }
+const tripLabel = (a: Agent) =>
+  a.trip === 'budget' ? '⚑ over budget' : a.trip === 'long-prompt' ? `⚑ past ${Math.round((longPromptOf(a.model) ?? 0) / 1000)}K` : undefined
 const meta = (a: Agent) =>
-  [isGuarded(a) && a.trip && TRIP[a.trip], a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
+  [isGuarded(a) && tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
 // --- desktop: one SVG per row, because the desktop lays sibling elements out on separate lines.
 
@@ -205,7 +212,7 @@ function headSvg(w: number, cost: number, saved: number, mainPct: number) {
     const x = i * (cw + gap)
     return `<rect class="card" x="${x}" y="1" width="${cw}" height="42" rx="10"/>${label(x + 10, 17, 11, 'dim', name)}${label(x + 10, 35, 15, fill ? '' : 'fg', value, ` font-weight="600"${fill ? ` fill="${fill}"` : ''}`)}`
   }
-  return svg(w, HEAD_H, card(0, 'Cost', `≈${fmtUsd(cost)}`) + card(1, 'Saved', fmtUsd(saved), GOOD) + card(2, 'Main context', `${mainPct}%`))
+  return svg(w, HEAD_H, card(0, 'Cost', `≈${fmtUsd(cost)}`) + card(1, 'Saved', fmtPriced(saved), GOOD) + card(2, 'Main context', `${mainPct}%`))
 }
 
 // Top right of a row: a pulsing dot while it works, a tick once done, a cross when it failed or stopped.
@@ -229,7 +236,7 @@ function rowSvg(w: number, a: Agent, at: number) {
     crab(2, 15, costumeOf(a), isLive(a), 2.4) +
       label(x, 18, 13, 'fg', clip(a.description || a.type, 13, tw), ' font-weight="600"') +
       `<text x="${x}" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${NAME[a.tier]}</tspan><tspan class="dim">${esc(info ? ` · ${clip(info, 11, tw - 50)}` : '')}</tspan></text>` +
-      label(x + tw, 49, 11, 'dim', `ctx ${ctx}% · ${fmtTokens(a.contextTokens)}   ≈${fmtUsd(a.costUsd)}   ${fmtTime(elapsed(a, at))}`, ' text-anchor="end"') +
+      label(x + tw, 49, 11, 'dim', `ctx ${ctx}% · ${fmtTokens(a.contextTokens)}   ≈${fmtPriced(a.costUsd)}   ${fmtTime(elapsed(a, at))}`, ' text-anchor="end"') +
       `<rect class="track" x="${x}" y="55" width="${tw}" height="4" rx="2"/><rect x="${x}" y="55" width="${Math.round((tw * ctx) / 100)}" height="4" rx="2" fill="${isGuarded(a) ? WARN : color}"/>` +
       mark(w - 8, 15, a, color) +
       `<line class="rule" x1="0" y1="65.5" x2="${w}" y2="65.5"/>`,
@@ -246,7 +253,7 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
     32,
     shown.map((a, i) => crab(i * 36, 2, costumeOf(a), isLive(a), 2)).join('') +
       (rest ? label(shown.length * 36 + 4, 21, 12, 'dim', `+${rest}`) : '') +
-      label(w, 21, 12, 'dim', `≈${fmtUsd(cost)} · saved ${fmtUsd(saved)}`, ' text-anchor="end"'),
+      label(w, 21, 12, 'dim', `≈${fmtUsd(cost)} · saved ${fmtPriced(saved)}`, ' text-anchor="end"'),
   )
 }
 
@@ -312,7 +319,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
   const done = list.filter(a => !isLive(a) && !isGuarded(a)).reverse()
-  const summary = `≈${fmtUsd(m.costUsd)} · saved ${fmtUsd(s.usd)} · main ${mainPct}%`
+  const summary = `≈${fmtUsd(m.costUsd)} · saved ${fmtPriced(s.usd)} · main ${mainPct}%`
   const collapse = (
     <Button key="collapse" plain label={u.isCompact ? 'Expand' : 'Collapse'} onPress={() => update($, ui, v => ({ ...v, isCompact: !v.isCompact }))} />
   )
@@ -371,7 +378,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Text wrap="truncate-end">
         {'  '}
         <Text color={isGuarded(a) ? WARN : COLOR[a.tier]}>{textBar(ctxOf(a), barW)}</Text>
-        <Text dimColor>{` ctx ${ctxOf(a)}% · ${fmtTokens(a.contextTokens)} ≈${fmtUsd(a.costUsd)} ${fmtTime(elapsed(a, at))}`}</Text>
+        <Text dimColor>{` ctx ${ctxOf(a)}% · ${fmtTokens(a.contextTokens)} ≈${fmtPriced(a.costUsd)} ${fmtTime(elapsed(a, at))}`}</Text>
       </Text>
     </Box>
   )
@@ -458,7 +465,7 @@ export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt
 function statusLine(list: Agent[], saved: number, at: number) {
   const live = list.filter(isLive)
   if (live.length === 0) return saved > 0 ? `🦀 saved ${fmtUsd(saved)}` : undefined
-  const shown = live.slice(-2).map(a => `🦀${NAME[a.tier][0]} ${ctxOf(a)}% ${fmtTime(elapsed(a, at))}`)
+  const shown = live.slice(-2).map(a => `🦀${LETTER[a.tier]} ${ctxOf(a)}% ${fmtTime(elapsed(a, at))}`)
   return [...shown, ...(live.length > 2 ? [`+${live.length - 2}`] : [])].join(' · ')
 }
 

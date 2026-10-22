@@ -4,6 +4,8 @@ import type { On, SessionRateLimit, TurnUsage } from 'claude-code'
 
 import type { Cache } from '../types'
 import { hasLapsed, keepWarmOf, pingDueAt } from './cache'
+import { PRICING_PAGE } from './pricing.fixture'
+import { parsePricing } from './prices'
 import { cacheLine } from './ui'
 import { NO_CACHE } from './state'
 
@@ -45,6 +47,7 @@ function engine(on: On, o: World = {}) {
   const sent = { forks: 0, read: 100_000 }
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, o.env ?? {})
+  mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
   on('settings.read', async () => ({ value: o.settings ?? {} }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: o.rateLimits ?? [], cost: { usd: 0 } } }) as never)
   on('command.register', async () => ({ value: undefined }) as never)

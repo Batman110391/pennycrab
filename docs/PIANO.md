@@ -7,13 +7,14 @@ Aggiornato il 22 ottobre 2026. Claude Code 2.1.308, branch `claude/elegant-ferma
 | Funzione | Stato | Dove |
 | --- | --- | --- |
 | **Router**: Explore e general-purpose di una sessione Opus o Fable girano su Sonnet (`prudent`); in `aggressive` l'Explore va su Haiku con effort basso | fatto, misurato dal vivo | `hooks/router.ts` |
-| **Telemetria**: costo per richiesta a prezzi di listino 5.x, contesto, tempo, strumento in uso | fatto, prezzi verificati sul costo reale della CLI | `hooks/telemetry.ts`, `hooks/prices.ts` |
+| **Telemetria**: costo per richiesta, contesto, tempo, strumento in uso | fatto, costo verificato al centesimo sul costo reale della CLI | `hooks/telemetry.ts` |
+| **Prezzi aggiornati**: letti dalla pagina ufficiale di Anthropic una volta al giorno, salvati tra le sessioni; nessun prezzo nel codice | fatto, verificato dal vivo | `hooks/prices.ts` |
 | **Guardiano**: oltre il budget (o su Haiku oltre 100K di contesto) il sub-agente viene fermato e consegna quello che ha trovato | fatto, verificato dal vivo | `hooks/guard.ts` |
 | **Cache calda**: un ping poco prima che la cache della conversazione principale scada, finché dura la finestra dopo l'ultimo turno | fatto, verificato dal vivo | `hooks/cache.ts` |
 | **Pannello, banda, riga di stato**: un granchio vestito per modello, costo, risparmio, contesto, stato della cache | fatto, da verificare a occhio in Desktop | `hooks/ui.tsx` |
 | **Installazione pulita** dal marketplace GitHub | fatto, installazione provata dal marketplace locale | `.claude-plugin/marketplace.json`, `README.md` |
 
-Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dollari), `keepWarm` (30 minuti).
+Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dollari), `keepWarm` (30 minuti). Versione 0.2.0.
 
 ## 2. Cosa è cambiato in questa sessione
 
@@ -23,6 +24,9 @@ Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dolla
 4. **Test**: da 21 a 47. Coprono guardiano, cache (TTL in 9 casi, 6 ping in 30 minuti, nessun ping con cache da 1 ora, una riscrittura parziale non ferma i ping, una riscrittura di quasi tutto sì, nessun ping su una cache scaduta, a turno aperto o con l'opzione `off`), riga di stato, strumento in uso.
 5. **Pacchetto**: `marketplace.json`, `README.md`, autore, repository, licenza e parole chiave in `plugin.json`. La validazione passa anche con il profilo del catalogo dei plugin.
 6. **Tipi**: tolto dalla cache il campo `held`, di cui non si conosceva lo scopo; al suo posto i campi che servono alla cache calda (fine dell'ultimo turno, turno aperto, ping del tratto in corso, risparmio).
+7. **Prezzi dalla pagina ufficiale** (dopo la revisione): prima c'era un solo listino per famiglia, scritto nel codice, che sbagliava le versioni vecchie (claude-opus-5 costa 5/25 con lettura cache a 0,50, non 4/20 con 0,20; claude-sonnet-5 e claude-fable-5 hanno la lettura cache a 0,20 e 1,00). Ora pennycrab legge la tabella «Model pricing» di `platform.claude.com/docs/en/about-claude/pricing.md` all'avvio, al massimo una volta al giorno, e la tiene nello spazio permanente della mod. Se la pagina non risponde o cambia formato restano i prezzi tenuti; senza nessun listino il costo dei sub-agenti si legge `?`. Anche la soglia del prompt lungo di Haiku (100K) arriva dalla pagina.
+8. **Guardiano**: scatta solo se il sub-agente vuole continuare (chiede strumenti); uno che supera il budget con la risposta finale aveva già finito e non viene segnato come fermato.
+9. **Riga di stato**: `🦀?` per un modello sconosciuto, invece della `O` che si confondeva con Opus.
 
 ## 3. Scoperte sul motore (utili per i prossimi passi)
 
@@ -34,14 +38,16 @@ Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dolla
 - **TTL della conversazione principale**, nell'ordine del motore: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, l'impostazione `promptCacheTtl`, `ENABLE_PROMPT_CACHING_1H`, poi l'account (1 ora con un abbonamento Claude entro i limiti, 5 minuti con chiave API, Bedrock, Vertex o Foundry). I sub-agenti scrivono a 5 minuti salvo `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` o `subagentPromptCacheTtl`.
 - **Un abbonamento si riconosce** dalle finestre `five_hour` e `seven_day` in `$.session.usage().rateLimits`; con una chiave API non ci sono.
 - **In modalità headless** il modulo della mod si carica all'inizio del primo turno, non all'avvio (aspetta un flag di rollout): nessun effetto pratico.
+- **I prezzi di Claude Code sono scritti nel suo codice**: la CLI calcola `/cost` da un catalogo incorporato («Hand-maintained baked-in model catalog»), aggiornato a ogni rilascio, più le tariffe aziendali `modelPricing`. Il catalogo che scarica da `downloads.claude.ai` serve al selettore dei modelli e non contiene prezzi. L'unica fonte pubblica e leggibile da una mod è la pagina ufficiale dei prezzi, che ha anche una versione Markdown.
 - **Kit di test**: gli hook vanno registrati prima della prima chiamata a `$`; una risposta finta a una chiamata su `$` va data come `{ value }`; il valore finale di uno stream `turn.step` si legge con `next()`, perché `for await` lo scarta; non si può simulare una chiusura del pannello fatta a mano.
 
 ## 4. Verifiche
 
 | Verifica | Esito |
 | --- | --- |
-| `claude plugin test .` | 47 test, 0 falliti |
-| Test che falliscono se si rompe la regola che proteggono | provato su 4 regole (ripresa del sub-agente, ping a vuoto, turno aperto, soglia di riscrittura) |
+| `claude plugin test .` | 58 test, 0 falliti |
+| Test che falliscono se si rompe la regola che proteggono | provato su 7 regole (ripresa del sub-agente, ping a vuoto, turno aperto, soglia di riscrittura, guardiano sulla risposta finale, lettera di stato, fine della sezione dei prezzi) |
+| Prezzi dal vivo | il motore ha scaricato la pagina (200, 0,68 s), pennycrab ha letto 20 modelli e li ha salvati; i prezzi di ogni versione e la fascia lunga di Haiku corrispondono alla pagina |
 | `tsc` con i tipi del motore 2.1.308 | nessun errore |
 | `claude plugin validate .` e `--profile directory` | passa; resta solo l'avviso sull'icona |
 | Installazione da marketplace (`claude plugin marketplace add` + `install`) | installata e abilitata, 3 opzioni lette |
@@ -98,7 +104,7 @@ Sessione su Sonnet tenuta aperta, cache forzata a 5 minuti (`FORCE_PROMPT_CACHIN
 | Tempo alla prima risposta (TTFT) | 1,8 s | 3,5 s | |
 
 - **Ogni ping ha letto tutta la conversazione** (61.081 e 61.140 token letti, 59 e 0 scritti), in 1,3–3,7 secondi. Un ping è costato 1/24 di una riscrittura, come prevede il listino (lettura a 0,1 $ per milione contro scrittura a 2,5 $ su Sonnet).
-- **Risparmio sul messaggio di ritorno: −78% misurato, −88% senza cache condivisa.** Il «Saved» calcolato da pennycrab per questa sessione è 0,134 $ (riscrittura evitata meno i ping), cioè il caso senza cache condivisa.
+- **Risparmio sul messaggio di ritorno: −78% misurato, −88% senza cache condivisa.** Il «Saved» che pennycrab calcola per questa sessione, con la formula verificata dai test, è 0,134 $ (riscrittura evitata meno i ping), cioè il caso senza cache condivisa; in modalità headless il pannello non si vede, quindi non l'ho letto lì.
 - **Perché il «senza ping» ha letto 27K token:** la parte iniziale della richiesta (prompt di sistema e strumenti) era identica nelle due sessioni e la cache è condivisa sullo stesso account; i ping della sessione calda l'hanno tenuta viva anche per l'altra. Nell'uso reale, altre sessioni aperte possono fare lo stesso: in quel caso il «Saved» di pennycrab sovrastima un po'.
 
 **Prima prova**, con un solo turno (35K token) e 6 minuti e 40 secondi di pausa: il ping ha letto 27K token e ne ha **riscritti 7,8K** (la parte dei messaggi), 0,022 $; il messaggio dopo ha letto tutti i 34.793 token e ne ha scritti 65. La riscrittura succede una volta sola: il fork rimanda la conversazione come la tiene il transcript, che dopo il primo turno può differire da come era partita la prima richiesta. Da qui le due correzioni al keep-warm: nessuno stop per una riscrittura parziale, nessun ping su una cache già scaduta. Il TTFT di quella prova (2,9 s con i ping, 2,1 s senza) non mostra differenze: a 35K token il tempo è rumore.
@@ -135,7 +141,8 @@ Con un abbonamento i dollari sono l'equivalente a listino: il beneficio reale è
 - **Il «Saved» della cache sovrastima un po' quando altre sessioni** con lo stesso prompt di sistema tengono viva la parte iniziale: senza ping quella parte sarebbe stata letta lo stesso.
 - **Il «Saved» del router è leggermente prudente**: assume che Opus avrebbe usato gli stessi token; nella prova Opus ne ha usati di più (risparmio reale 0,262 $, stimato 0,247 $).
 - **Durante un turno lungo non si fanno ping** (per esempio un comando di 10 minuti): una cache da 5 minuti può scadere lì in mezzo.
-- **I prezzi sono fissi nel codice** (listino del 22 ottobre 2026, solo modelli 5.x); un modello diverso non ha prezzo invece di averne uno sbagliato.
+- **I prezzi dipendono dal formato della pagina ufficiale**: se Anthropic cambia la tabella, pennycrab non la accetta e tiene l'ultimo listino buono; il costo totale della sessione resta comunque quello di Claude Code.
+- **Non contati**: le tariffe aziendali `modelPricing` e il sovrapprezzo di 1,1× per l'inferenza solo negli USA (`inference_geo`), che le richieste non dichiarano alla mod.
 - **Il contesto dei sub-agenti** è misurato su una finestra fissa di 1M, che vale per tutti i modelli 5.x.
 - **Icona**: non c'è. Il granchio è derivato da Clawd, la mascotte di Anthropic, quindi per un'icona pubblica conviene un disegno proprio.
 
@@ -144,4 +151,4 @@ Con un abbonamento i dollari sono l'equivalente a listino: il beneficio reale è
 1. **Tu: prove visive in Desktop** (punto 3 del piano precedente): riga «Guard» con il Guardiano e «⚑ over budget», banda con «handover», riga «Cache warm · …» nel pannello, toast alla chiusura del pannello, apertura del pannello a ogni ondata, dettagli dei granchi a 24 px.
 2. **Unire `claude/elegant-fermat-ycm7rm` in `main`**: il marketplace legge il branch principale.
 3. **Installare in modo pulito**: `/plugin install pennycrab --marketplace Batman110391/pennycrab` (in Desktop: **+** → Plugins → Add marketplace → Add plugin), dopo aver tolto `CLAUDE_CODE_PLUGIN_DIRS` se l'avevi rimesso.
-4. **Facoltativi**: un'icona propria, il passaggio alla versione 1.0.0 con un tag, ping anche durante i turni molto lunghi.
+4. **Facoltativi**: un'icona propria, le tariffe aziendali `modelPricing`, un controllo automatico su GitHub (test e validazione a ogni push), un avviso la prima volta che parte un ping, ping anche durante i turni molto lunghi.

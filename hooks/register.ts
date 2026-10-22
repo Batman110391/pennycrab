@@ -4,6 +4,7 @@ import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from
 import type { KeepWarm } from './cache'
 import { answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
 import type { Budget } from './guard'
+import { loadStoredPrices, refreshPrices } from './prices'
 import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
 import { addAgent, finish, recordStep, setTool } from './telemetry'
@@ -18,6 +19,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
+    await loadStoredPrices($)
+    void refreshPrices($).catch(() => undefined)
     $.clock.every(1000, () => {
       void tick($)
       void keepWarm($, warmMs).catch(() => undefined)
@@ -58,7 +61,7 @@ export const register: Register = (on, options) => {
     if (result.usage) {
       await recordStep($, e.agentId, e.model, result.usage)
       if (e.agentId === undefined) await onMainStep($, e.model, result.usage)
-      await guardStep($, e.agentId, budgetUsd)
+      await guardStep($, e.agentId, budgetUsd, result.toolUses.length > 0)
     }
     return result
   })

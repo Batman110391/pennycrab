@@ -22,8 +22,8 @@ export type Agent = {
   contextWindow: number
   costUsd: number
   savedUsd: number
-  // Why the guard stopped it, once it did.
-  trip?: 'budget' | 'haiku-context'
+  // Why the guard stopped it, once it did: its budget, or a context past its model's long-prompt price line.
+  trip?: 'budget' | 'long-prompt'
 }
 
 export type Main = {

@@ -4,6 +4,8 @@ import type { On, TurnUsage } from 'claude-code'
 
 import type { Agent } from '../types'
 import { budgetOf, tripOf } from './guard'
+import { PRICING_PAGE } from './pricing.fixture'
+import { parsePricing } from './prices'
 
 const row = (over: Partial<Agent>): Agent => ({
   id: 'a1',
@@ -22,12 +24,13 @@ const row = (over: Partial<Agent>): Agent => ({
   ...over,
 })
 
-test('the guard trips on the budget, and on Haiku past its long-prompt line', () => {
-  expect(tripOf(row({ costUsd: 1.99 }), 2)).toBeUndefined()
-  expect(tripOf(row({ costUsd: 2 }), 2)).toBe('budget')
-  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_001 }), 2)).toBe('haiku-context')
-  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_000 }), 2)).toBeUndefined()
-  expect(tripOf(row({ contextTokens: 400_000 }), 2)).toBeUndefined()
+test('the guard trips on the budget, and past the long-prompt line of a model that has one', () => {
+  expect(tripOf(row({ costUsd: 1.99 }), 2, undefined)).toBeUndefined()
+  expect(tripOf(row({ costUsd: 2 }), 2, undefined)).toBe('budget')
+  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_001 }), 2, 100_000)).toBe('long-prompt')
+  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_000 }), 2, 100_000)).toBeUndefined()
+  // A model with no long-prompt price has no line to pass.
+  expect(tripOf(row({ contextTokens: 400_000 }), 2, undefined)).toBeUndefined()
 })
 
 test('the budget option reads as dollars, off as no guard, unset as $2', () => {
@@ -38,11 +41,14 @@ test('the budget option reads as dollars, off as no guard, unset as $2', () => {
 const COSTLY: TurnUsage = { model: 'claude-sonnet-5-5', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
 
 // The test's hooks stand for the engine: an Opus session whose Explore runs on Sonnet as a1, each request
-// costing COSTLY and asking for a tool, and every tool answering 'ok'.
-async function session($: Engine, on: On) {
+// costing COSTLY and asking for a tool (or, `isFinal`, answering), every tool answering 'ok', and the prices
+// of the pricing page already kept.
+async function session($: Engine, on: On, isFinal = false) {
   const sent = { steps: 0, tools: 0, toasts: [] as string[] }
+  const T0 = Date.parse('2026-10-22T10:00:00Z')
   mock.env(on, {})
-  mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.clock(on, { now: T0 })
+  mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
   on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
@@ -53,8 +59,10 @@ async function session($: Engine, on: On) {
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   on('turn.step', async function* (_$, e) {
     sent.steps++
-    yield { kind: 'stop', stopReason: 'tool_use', usage: COSTLY }
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: COSTLY }
+    const stopReason = isFinal ? 'end_turn' : 'tool_use'
+    yield { kind: 'stop', stopReason, usage: COSTLY }
+    const toolUses = isFinal ? [] : [{ name: 'Read', input: { file_path: 'src/auth.ts' } }]
+    return { turnId: e.turnId, index: e.index, answer: isFinal ? 'The auth flow is in src/auth.ts.' : '', toolUses, stopReason, usage: COSTLY }
   })
   on('tool.call', async () => {
     sent.tools++
@@ -111,4 +119,14 @@ test('a handed-over subagent that ended and is resumed gets its wrap-up steps ag
   const resumed = await step($, 0)
   expect(resumed.answer).not.toContain('Stopped by pennycrab')
   expect(sent.steps).toBe(4)
+})
+
+test('a subagent whose final answer crosses its budget had finished by itself: no handover, no toast', async ($: Engine, on) => {
+  const sent = await session($, on, true)
+  await step($, 0)
+  const tool = await $.tool.call({ tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' })
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', component: 'Pane', requestId: 'pennycrab', props: { title: 'Pennycrab', isFocused: false, bodyColumns: 60, placement: 'dock' } as never })
+  const guard = (await ui.findAll({ type: 'Text', text: /^Guard/ })).length
+  await ui.unmount()
+  expect({ deny: tool.deny, toasts: sent.toasts.length, guard }).toEqual({ deny: undefined, toasts: 0, guard: 0 })
 })

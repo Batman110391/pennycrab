@@ -126,6 +126,24 @@ test('the status line counts a running subagent each second, then clears once it
   expect(lines).toEqual(['🦀S 0% 1s', '🦀S 0% 2s', '🦀S 0% 3s', undefined])
 })
 
+test('the status line marks a model pennycrab cannot name with ?, not the O of Opus', async ($: Engine, on) => {
+  const lines: (string | undefined)[] = []
+  const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.env(on, { CLAUDE_CODE_SUBAGENT_MODEL: 'mystery-model' })
+  on('agent.spawn', async () => ({ model: 'mystery-model', agentId: 'a1' }) as never)
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
+  on('ui.status', async (_$, e) => {
+    lines.push(e.text)
+    return { value: undefined } as never
+  })
+  on('session.start', async () => ({ cwd: '/repo' }) as never)
+  await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Look', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  await clock.advance(1000)
+  expect(lines).toEqual(['🦀? 0% 1s'])
+})
+
 test('a subagent running a tool shows it on its row, then goes back to running', async ($: Engine, on) => {
   let release = () => {}
   const held = new Promise<void>(r => (release = r))
