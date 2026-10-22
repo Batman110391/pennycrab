@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 
 import type { Agent, Cache, Tier } from '../types'
-import { longPromptOf, priceBook } from './prices'
+import { priceBook } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
 export const PANE = 'pennycrab'
@@ -44,8 +44,7 @@ const isGuarded = (a: Agent) => a.status === 'handover'
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 const tierOfName = (model: string): Tier => (['haiku', 'sonnet', 'opus', 'fable'] as const).find(t => model.includes(t)) ?? 'other'
-const tripLabel = (a: Agent) =>
-  a.trip === 'budget' ? '⚑ over budget' : a.trip === 'long-prompt' ? `⚑ past ${Math.round((longPromptOf(a.model) ?? 0) / 1000)}K` : undefined
+const tripLabel = (a: Agent) => (a.trip === 'budget' ? '⚑ over budget' : undefined)
 const meta = (a: Agent) =>
   [isGuarded(a) && tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOfName(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
@@ -291,7 +290,9 @@ const CACHE_TICK_MS = 15_000
 export function cacheLine(c: Cache, at: number) {
   if (c.ttlMs === null || c.lastRequestAt === null) return undefined
   const left = c.lastRequestAt + c.ttlMs - at
-  const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${Math.ceil(left / 60_000)}m left` : 'Cache expired'
+  const mins = Math.ceil(left / 60_000)
+  const leftText = mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
+  const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${leftText} left` : 'Cache expired'
   const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtUsd(c.pingUsd)}` : ''
   return state + pings
 }

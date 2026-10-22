@@ -84,9 +84,6 @@ const priceOfModel = (model: string) => {
   return key ? book!.models[key] : undefined
 }
 
-// The prompt length past which a model bills at its long-prompt price, when it has one.
-export const longPromptOf = (model: string) => priceOfModel(model)?.long?.above
-
 export function promptTokens(u: Usage): number {
   return u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
 }

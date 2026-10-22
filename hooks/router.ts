@@ -3,16 +3,18 @@ import type { AgentSpawnInput, AgentSpawnResult, EngineInterface, TurnStepInput 
 import { tierOf } from './prices'
 import { routed } from './state'
 
-export type RouterMode = 'prudent' | 'aggressive' | 'off'
+export type RouterMode = 'auto' | 'prudent' | 'off'
 type Pick = { model: 'haiku' | 'sonnet'; effort?: 'low' }
 
 const RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 }
 
 // The model a built-in subagent gets instead of inheriting its parent's, or undefined to leave it.
+// auto: Explore, which only reads and searches, on Haiku at low effort (measured: the same 32 files described, at
+// 5% of Sonnet's cost and 70% of its time); general-purpose, which also edits, on Sonnet. prudent: both on Sonnet.
 // Never a model above the parent's; a type the user defined keeps its own model.
 export function routeFor(mode: RouterMode, type: string, parentModel: string): Pick | undefined {
   if (mode === 'off' || (type !== 'Explore' && type !== 'general-purpose')) return undefined
-  const pick: Pick = mode === 'aggressive' && type === 'Explore' ? { model: 'haiku', effort: 'low' } : { model: 'sonnet' }
+  const pick: Pick = mode === 'auto' && type === 'Explore' ? { model: 'haiku', effort: 'low' } : { model: 'sonnet' }
   const parent = RANK[tierOf(parentModel)]
   return parent !== undefined && RANK[pick.model]! < parent ? pick : undefined
 }

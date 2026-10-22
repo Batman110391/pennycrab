@@ -24,13 +24,10 @@ const row = (over: Partial<Agent>): Agent => ({
   ...over,
 })
 
-test('the guard trips on the budget, and past the long-prompt line of a model that has one', () => {
-  expect(tripOf(row({ costUsd: 1.99 }), 2, undefined)).toBeUndefined()
-  expect(tripOf(row({ costUsd: 2 }), 2, undefined)).toBe('budget')
-  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_001 }), 2, 100_000)).toBe('long-prompt')
-  expect(tripOf(row({ tier: 'haiku', contextTokens: 100_000 }), 2, 100_000)).toBeUndefined()
-  // A model with no long-prompt price has no line to pass.
-  expect(tripOf(row({ contextTokens: 400_000 }), 2, undefined)).toBeUndefined()
+test('the guard trips on the budget alone: a Haiku subagent past its long-prompt line still costs less than on any other model', () => {
+  expect(tripOf(row({ costUsd: 1.99 }), 2)).toBeUndefined()
+  expect(tripOf(row({ costUsd: 2 }), 2)).toBe('budget')
+  expect(tripOf(row({ tier: 'haiku', model: 'claude-haiku-5-5', contextTokens: 400_000, costUsd: 0.3 }), 2)).toBeUndefined()
 })
 
 test('the budget option reads as dollars, off as no guard, unset as $2', () => {

@@ -12,8 +12,13 @@ import { NO_CACHE } from './state'
 const MIN = 60_000
 const T0 = Date.parse('2026-10-22T10:00:00Z')
 
-test('the keep-warm option reads as a window after the last turn, off as none, unset as 30 minutes', () => {
-  expect([keepWarmOf('15m'), keepWarmOf('2h'), keepWarmOf(undefined), keepWarmOf('off')]).toEqual([15 * MIN, 120 * MIN, 30 * MIN, undefined])
+test('the keep-warm option reads as a window after the last turn, auto (the default) as up to 8 hours weighed, off as none', () => {
+  expect([keepWarmOf('30m'), keepWarmOf('8h'), keepWarmOf(undefined), keepWarmOf('off')]).toEqual([
+    { windowMs: 30 * MIN, isAuto: false },
+    { windowMs: 480 * MIN, isAuto: false },
+    { windowMs: 480 * MIN, isAuto: true },
+    undefined,
+  ])
 })
 
 test('a ping is due 45s before a 5-minute entry lapses, and never while a 1-hour entry outlasts the window', () => {
@@ -42,12 +47,12 @@ test('the cache line says how long the cache stays warm and what the pings cost'
 
 // The test's hooks stand for the engine: its settings and the status line's figures, a main turn whose one request
 // answers over a 100K-token context, and a fork that reads it all from the cache.
-type World = { env?: Record<string, string>; settings?: Record<string, unknown>; rateLimits?: SessionRateLimit[] }
+type World = { env?: Record<string, string>; settings?: Record<string, unknown>; rateLimits?: SessionRateLimit[]; noPrices?: boolean }
 function engine(on: On, o: World = {}) {
   const sent = { forks: 0, read: 100_000 }
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, o.env ?? {})
-  mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
+  mock.store(on, o.noPrices ? {} : { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
   on('settings.read', async () => ({ value: o.settings ?? {} }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: o.rateLimits ?? [], cost: { usd: 0 } } }) as never)
   on('command.register', async () => ({ value: undefined }) as never)
@@ -86,10 +91,10 @@ const start = ($: Engine) => $.session.start({ source: 'startup', cwd: '/repo', 
 const PLAN: SessionRateLimit[] = [{ kind: 'five_hour', percentUsed: 40 }]
 const TTL_CASES: [string, World, string | undefined][] = [
   ['FORCE_PROMPT_CACHING_5M wins over every other source', { env: { FORCE_PROMPT_CACHING_5M: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }, rateLimits: PLAN }, '5m'],
-  ['CLAUDE_CODE_PROMPT_CACHE_TTL wins over the setting', { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }, settings: { promptCacheTtl: '5m' } }, '60m'],
+  ['CLAUDE_CODE_PROMPT_CACHE_TTL wins over the setting', { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }, settings: { promptCacheTtl: '5m' } }, '1h00m'],
   ['the promptCacheTtl setting wins over the account', { settings: { promptCacheTtl: '5m' }, rateLimits: PLAN }, '5m'],
-  ['ENABLE_PROMPT_CACHING_1H gives an API key an hour', { env: { ENABLE_PROMPT_CACHING_1H: '1' } }, '60m'],
-  ['a subscription within its limits caches for an hour', { rateLimits: PLAN }, '60m'],
+  ['ENABLE_PROMPT_CACHING_1H gives an API key an hour', { env: { ENABLE_PROMPT_CACHING_1H: '1' } }, '1h00m'],
+  ['a subscription within its limits caches for an hour', { rateLimits: PLAN }, '1h00m'],
   ['a subscription past its limits caches for 5 minutes', { rateLimits: [{ kind: 'five_hour', percentUsed: 100 }] }, '5m'],
   ['an API key caches for 5 minutes', {}, '5m'],
   ['a cloud provider caches for 5 minutes', { env: { CLAUDE_CODE_USE_VERTEX: '1' }, rateLimits: PLAN }, '5m'],
@@ -105,7 +110,7 @@ for (const [name, world, left] of TTL_CASES) {
   })
 }
 
-test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after them reads the cache: a re-write spared', async ($: Engine, on) => {
+test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after them reads the cache: a re-write spared', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -127,7 +132,7 @@ test('on a 1-hour cache a 30-minute window needs no ping', async ($: Engine, on)
   expect(sent.forks).toBe(0)
 })
 
-test('a ping that rewrites a part of the conversation goes on; one that rewrites most of it stops the pings', async ($: Engine, on) => {
+test('a ping that rewrites a part of the conversation goes on; one that rewrites most of it stops the pings', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -160,4 +165,70 @@ test('with keep-warm off, no ping', { options: { keepWarm: 'off' } }, async ($: 
   await turn($, 'm1')
   await clock.advance(30 * MIN)
   expect(sent.forks).toBe(0)
+})
+
+// auto, with the fake engine's numbers on Opus 5.5: a ping reads 100K tokens for $0.0202; a rewrite of them costs
+// $0.48 more than reading them on a 5-minute cache, $0.78 more on a 1-hour cache.
+test('auto on a 5-minute cache stops once the pings would pass a quarter of the rewrite: 5 pings', async ($: Engine, on) => {
+  const { sent, clock } = engine(on)
+  await start($)
+  await turn($, 'm1')
+  await clock.advance(60 * MIN)
+  expect(sent.forks).toBe(5)
+})
+
+test('auto on a subscription: away 1 hour 5 minutes, one ping at 59 minutes, and the return reads the cache', async ($: Engine, on) => {
+  const { sent, clock } = engine(on, { rateLimits: PLAN })
+  await start($)
+  await turn($, 'm1')
+  await clock.advance(65 * MIN)
+  expect(sent.forks).toBe(1)
+  await turn($, 'm2')
+  const summary = await paneText($, /saved/)
+  // $0.78 of rewrite spared, less the one ping.
+  expect(summary.some(t => t.includes('saved $0.76'))).toBe(true)
+})
+
+test('auto on a subscription keeps the cache warm 8 hours at most: 8 pings, one an hour', { timeoutMs: 60_000 }, async ($: Engine, on) => {
+  const { sent, clock } = engine(on, { rateLimits: PLAN })
+  await start($)
+  await turn($, 'm1')
+  // The kit resolves at most 10,000 waits an advance: ten hours of one-second ticks go an hour at a time.
+  for (let h = 0; h < 10; h++) await clock.advance(60 * MIN)
+  expect(sent.forks).toBe(8)
+})
+
+test('auto with no prices to weigh the pings sends none', async ($: Engine, on) => {
+  const { sent, clock } = engine(on, { noPrices: true })
+  await start($)
+  await turn($, 'm1')
+  await clock.advance(30 * MIN)
+  expect(sent.forks).toBe(0)
+})
+
+test('after the first turn one toast says what pennycrab chose for the account; the next turn says nothing', async ($: Engine, on) => {
+  const toasts: string[] = []
+  engine(on, { rateLimits: PLAN })
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  await start($)
+  await turn($, 'm1')
+  await turn($, 'm2')
+  expect(toasts).toEqual([
+    'pennycrab is set for your Claude subscription: 1-hour cache, one ping an hour while you are away (up to 8 h) · Explore on Haiku, general-purpose on Sonnet · $2.00 cap per subagent. /plugin configure pennycrab to change it.',
+  ])
+})
+
+test('pay-per-token use is told its 5-minute cache is kept warm as long as the pings pay for themselves', async ($: Engine, on) => {
+  const toasts: string[] = []
+  engine(on)
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  await start($)
+  await turn($, 'm1')
+  expect(toasts[0]).toContain('set for pay-per-token use: 5-minute cache, pings while you are away as long as they pay for themselves')
 })

@@ -12,18 +12,24 @@ const savings = atom({ plugin: 'pennycrab', key: 'savings' } as const, NO_SAVING
 
 type Usage = Parameters<typeof costOf>[1]
 
-export type KeepWarm = 'off' | '15m' | '30m' | '1h' | '2h'
+export type KeepWarm = 'auto' | 'off' | '30m' | '1h' | '2h' | '4h' | '8h'
 const MINUTE = 60_000
 const TTL = { '5m': 5 * MINUTE, '1h': 60 * MINUTE } as const
 type Ttl = keyof typeof TTL
 const isTtl = (v: unknown): v is Ttl => v === '5m' || v === '1h'
 const ttlName = (ms: number): Ttl => (ms >= TTL['1h'] ? '1h' : '5m')
 
-// How long after the person's last turn the cache is kept warm; undefined when off.
-export function keepWarmOf(option: KeepWarm | undefined): number | undefined {
-  const k = option ?? '30m'
+// How long after the person's last turn the cache is kept warm; undefined when off. `auto` keeps it warm while
+// the pings of one absence cost at most AUTO_SHARE of the rewrite they spare, so that coming back once pays them
+// back four times, for AUTO_MAX at most: a few pings an hour on a 5-minute cache, one an hour on a 1-hour cache.
+export type WarmPolicy = { windowMs: number; isAuto: boolean }
+const AUTO_SHARE = 0.25
+const AUTO_MAX = 8 * 60 * MINUTE
+export function keepWarmOf(option: KeepWarm | undefined): WarmPolicy | undefined {
+  const k = option ?? 'auto'
   if (k === 'off') return undefined
-  return Number(k.slice(0, -1)) * (k.endsWith('h') ? 60 : 1) * MINUTE
+  if (k === 'auto') return { windowMs: AUTO_MAX, isAuto: true }
+  return { windowMs: Number(k.slice(0, -1)) * (k.endsWith('h') ? 60 : 1) * MINUTE, isAuto: false }
 }
 
 // A ping goes out this long before the entry would lapse: the read lands at the request's start, and the
@@ -60,11 +66,12 @@ export async function onMainTurnStart($: EngineInterface) {
   await update($, cache, c => ({ ...c, isTurnOpen: true }))
 }
 
-// The person's turn is over: the keep-warm window starts, at the TTL the session caches with now.
+// The person's turn is over: the keep-warm window starts, at the TTL the session caches with now, which it returns.
 export async function onMainTurnEnd($: EngineInterface) {
   const at = await $.clock.now()
   const ttl = await ttlOf($)
   await update($, cache, c => ({ ...c, ...ttl, isTurnOpen: false, isHalted: false, lastTurnAt: at }))
+  return ttl
 }
 
 // What it costs to write `tokens` to the cache rather than read them from it.
@@ -100,21 +107,30 @@ export function pingDueAt(c: Cache, windowMs: number): number | undefined {
   return lapsesAt >= c.lastTurnAt + windowMs ? undefined : lapsesAt - LEAD_MS
 }
 
+// Under `auto`, whether one more ping still pays: what this absence's pings would then cost against a quarter of
+// the rewrite they spare. Without prices nothing can be weighed, and no ping goes out.
+function isWorthAnother(c: Cache, model: string, contextTokens: number, ttl: Ttl) {
+  const rewrite = rewriteOf(model, contextTokens, ttl)
+  const none = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0 }
+  const next = c.stretchPings > 0 ? c.stretchUsd / c.stretchPings : costOf(model, { ...none, cache_read_input_tokens: contextTokens }, ttl)
+  return rewrite > 0 && next !== undefined && c.stretchUsd + next <= rewrite * AUTO_SHARE
+}
+
 let isPinging = false
 // Each second: once a ping is due, one fork of the main thread reads its cache, which renews the entry.
-export async function keepWarm($: EngineInterface, windowMs: number | undefined) {
-  if (windowMs === undefined || isPinging) return
+export async function keepWarm($: EngineInterface, policy: WarmPolicy | undefined) {
+  if (policy === undefined || isPinging) return
   const c = await read($, cache)
-  const due = pingDueAt(c, windowMs)
+  const due = pingDueAt(c, policy.windowMs)
   const at = await $.clock.now()
   if (due === undefined || at < due || c.ttlMs === null) return
-  if (hasLapsed(c, at)) {
+  const m = await read($, main)
+  if (hasLapsed(c, at) || (policy.isAuto && !isWorthAnother(c, m.model, m.contextTokens, ttlName(c.ttlMs)))) {
     await update($, cache, v => ({ ...v, isHalted: true }))
     return
   }
   isPinging = true
   try {
-    const m = await read($, main)
     const r = await $.model.fork({ prompt: PING })
     if (!('usage' in r)) {
       await update($, cache, v => ({ ...v, isHalted: true }))

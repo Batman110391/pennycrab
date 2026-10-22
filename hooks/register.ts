@@ -7,15 +7,16 @@ import type { Budget } from './guard'
 import { loadStoredPrices, refreshPrices } from './prices'
 import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
+import { announceSetup } from './setup'
 import { addAgent, finish, recordStep, setTool } from './telemetry'
 import { onSpawnUi, renderBand, renderPane, tick, togglePane } from './ui'
 
 // One hook per event (the engine takes no second unmatched one); each module adds its part here.
 // Every hook fails open: on an error the engine's own behaviour goes on.
 export const register: Register = (on, options) => {
-  const mode = (options.router as RouterMode | undefined) ?? 'prudent'
+  const mode = (options.router as RouterMode | undefined) ?? 'auto'
   const budgetUsd = budgetOf(options.budget as Budget | undefined)
-  const warmMs = keepWarmOf(options.keepWarm as KeepWarm | undefined)
+  const warm = keepWarmOf(options.keepWarm as KeepWarm | undefined)
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
@@ -23,7 +24,7 @@ export const register: Register = (on, options) => {
     void refreshPrices($).catch(() => undefined)
     $.clock.every(1000, () => {
       void tick($)
-      void keepWarm($, warmMs).catch(() => undefined)
+      void keepWarm($, warm).catch(() => undefined)
     })
     return next(e)
   })
@@ -82,7 +83,7 @@ export const register: Register = (on, options) => {
       await finish($, e.agentId, e.reason)
       forget(e.agentId)
     } else {
-      await onMainTurnEnd($)
+      await announceSetup($, await onMainTurnEnd($), { router: mode, budgetUsd, warm })
     }
     return next(e)
   })

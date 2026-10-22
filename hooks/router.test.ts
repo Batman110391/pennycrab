@@ -12,12 +12,15 @@ test('prudent: built-in subagents of an Opus or Fable session run on Sonnet', ()
 test('never routes up, never touches a session already on Sonnet or Haiku in prudent mode', () => {
   expect(routeFor('prudent', 'Explore', 'claude-sonnet-5-5')).toBeUndefined()
   expect(routeFor('prudent', 'Explore', 'claude-haiku-5-5')).toBeUndefined()
-  expect(routeFor('aggressive', 'Explore', 'claude-haiku-5-5')).toBeUndefined()
+  expect(routeFor('auto', 'Explore', 'claude-haiku-5-5')).toBeUndefined()
+  expect(routeFor('auto', 'general-purpose', 'claude-sonnet-5-5')).toBeUndefined()
 })
 
-test('aggressive: Explore drops to Haiku at low effort, general-purpose to Sonnet', () => {
-  expect(routeFor('aggressive', 'Explore', 'claude-sonnet-5-5')).toEqual({ model: 'haiku', effort: 'low' })
-  expect(routeFor('aggressive', 'general-purpose', 'claude-opus-5-5')).toEqual({ model: 'sonnet' })
+test('auto: Explore runs on Haiku at low effort from any model above it, general-purpose on Sonnet from Opus or Fable', () => {
+  expect(routeFor('auto', 'Explore', 'claude-sonnet-5-5')).toEqual({ model: 'haiku', effort: 'low' })
+  expect(routeFor('auto', 'Explore', 'claude-fable-5-1')).toEqual({ model: 'haiku', effort: 'low' })
+  expect(routeFor('auto', 'general-purpose', 'claude-opus-5-5')).toEqual({ model: 'sonnet' })
+  expect(routeFor('auto', 'general-purpose', 'claude-fable-5-1')).toEqual({ model: 'sonnet' })
 })
 
 test('off, user-defined types and unknown parents are left alone', () => {
@@ -41,7 +44,15 @@ function engine(on: On, seen: (string | undefined)[], env: Record<string, string
 const spawn = (over: Record<string, unknown>) =>
   ({ tool_use_id: 't', prompt: 'p', description: 'Find the auth flow', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: false, fork: false, ...over }) as never
 
-test('a plain Explore spawn of an Opus session reaches the engine asking for Sonnet', async ($: Engine, on) => {
+test('by default a plain Explore spawn of an Opus session reaches the engine asking for Haiku, a general-purpose one for Sonnet', async ($: Engine, on) => {
+  const seen: (string | undefined)[] = []
+  engine(on, seen)
+  await $.agent.spawn(spawn({}))
+  await $.agent.spawn(spawn({ subagentType: 'general-purpose' }))
+  expect(seen).toEqual(['haiku', 'sonnet'])
+})
+
+test('prudent: a plain Explore spawn of an Opus session asks for Sonnet', { options: { router: 'prudent' } }, async ($: Engine, on) => {
   const seen: (string | undefined)[] = []
   engine(on, seen)
   await $.agent.spawn(spawn({}))

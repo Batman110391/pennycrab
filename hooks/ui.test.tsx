@@ -24,7 +24,7 @@ test('each role wears its own costume, and only a working crab moves', () => {
   expect(crab(0, 0, 'opus', false, 2)).not.toContain('run')
 })
 
-// The test's hooks stand for the engine: a session on Opus, and one plain Explore spawn the router sends to Sonnet.
+// The test's hooks stand for the engine: a session on Opus, and one plain Explore spawn the router sends to Haiku.
 async function session($: Engine, on: On) {
   mock.env(on, {})
   mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
@@ -45,7 +45,7 @@ test('terminal: the pane lists the routed subagent as text', async ($: Engine, o
   const found = {
     svg: (await ui.findAll({ type: 'Svg' })).length,
     row: (await ui.findAll({ type: 'Text', text: /^Find the <auth> flow$/ })).length,
-    routed: (await ui.findAll({ type: 'Text', text: /^  Sonnet · ↓ from Opus$/ })).length,
+    routed: (await ui.findAll({ type: 'Text', text: /^  Haiku · low · ↓ from Opus$/ })).length,
   }
   await ui.unmount()
   expect(found).toEqual({ svg: 0, row: 1, routed: 1 })

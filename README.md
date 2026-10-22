@@ -2,9 +2,9 @@
 
 The crab that counts your pennies. A Claude Code mod that:
 
-- **routes subagents to cheaper models**: built-in Explore and general-purpose subagents of an Opus or Fable session run on Sonnet;
+- **routes subagents to cheaper models**: the built-in Explore, which only reads and searches, runs on Haiku; general-purpose runs on Sonnet when your session is on Opus or Fable;
 - **stops runaway subagents**: past a budget, a subagent is asked to hand back what it found, and stopped if it keeps going;
-- **keeps the prompt cache warm** while you are away, so your next message reads the conversation from the cache instead of writing it again;
+- **keeps the prompt cache warm** while you are away, so your next message reads the conversation from the cache instead of writing it again. It adapts to your account: one ping an hour on a Claude subscription's 1-hour cache, a few pings on a pay-per-token 5-minute cache, and only as long as the pings cost less than a quarter of the rewrite they spare;
 - **shows it all in a live pane**: one crab per subagent, dressed for the model it runs on, with its context, cost and time.
 
 ## Install
@@ -17,7 +17,7 @@ In a terminal session of Claude Code:
 
 Answer `y` to add the marketplace, then pick a scope. In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `Batman110391/pennycrab`, then **Add plugin**.
 
-Type `/pennycrab` to show or hide the pane. It also opens by itself when a wave of subagents starts.
+Type `/pennycrab` to show or hide the pane. It also opens by itself when a wave of subagents starts. After your first turn a toast says what pennycrab found and chose for your account (subscription or pay-per-token, cache length, router, budget); it shows again only when that changes.
 
 ## Options
 
@@ -25,9 +25,9 @@ Set them in the config menu, or with `/plugin configure pennycrab`.
 
 | Option | Values | Default | What it does |
 | --- | --- | --- | --- |
-| `router` | `prudent`, `aggressive`, `off` | `prudent` | `prudent`: Explore and general-purpose run on Sonnet when your session runs on Opus or Fable. `aggressive`: Explore also drops to Haiku at low effort. Never a model above yours; a subagent type you defined, an explicit model, a fork, `CLAUDE_CODE_SUBAGENT_MODEL`, Bedrock, Vertex and Foundry are left alone. |
-| `budget` | `0.50`, `1`, `2`, `5` (USD), `off` | `2` | The most one subagent may spend. Past it, or past the prompt length where its model bills higher (Haiku 5.5's 100K, as the pricing page states it), a subagent that wants to go on is handed over: its tool calls are refused with a note to write its final answer from what it found. If it keeps calling tools, its third request after that is answered by pennycrab, which ends its turn. |
-| `keepWarm` | `off`, `15m`, `30m`, `1h`, `2h` | `30m` | How long after your last turn the main conversation's cache stays warm. Shortly before the cache would expire, pennycrab sends one ping that reads it, which renews it. |
+| `router` | `auto`, `prudent`, `off` | `auto` | `auto`: Explore runs on Haiku at low effort from any model above it (Sonnet, Opus, Fable); general-purpose runs on Sonnet from Opus or Fable. `prudent`: both on Sonnet, from Opus or Fable only. Never a model above yours; a subagent type you defined, an explicit model, a fork, `CLAUDE_CODE_SUBAGENT_MODEL`, Bedrock, Vertex and Foundry are left alone. |
+| `budget` | `0.50`, `1`, `2`, `5` (USD), `off` | `2` | The most one subagent may spend. Past it, a subagent that wants to go on is handed over: its tool calls are refused with a note to write its final answer from what it found. If it keeps calling tools, its third request after that is answered by pennycrab, which ends its turn. |
+| `keepWarm` | `auto`, `30m`, `1h`, `2h`, `4h`, `8h`, `off` | `auto` | Shortly before the main conversation's cache would expire, pennycrab sends one ping that reads it, which renews it. `auto`: as long as the pings of one absence cost at most a quarter of the rewrite they spare, up to 8 hours: about half an hour on a 5-minute cache, up to 8 hours (one ping an hour) on a subscription's 1-hour cache. A time: that long after your last turn. |
 
 ## How the numbers are counted
 

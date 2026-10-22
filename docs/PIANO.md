@@ -6,15 +6,16 @@ Aggiornato il 22 ottobre 2026. Claude Code 2.1.308, branch `claude/elegant-ferma
 
 | Funzione | Stato | Dove |
 | --- | --- | --- |
-| **Router**: Explore e general-purpose di una sessione Opus o Fable girano su Sonnet (`prudent`); in `aggressive` l'Explore va su Haiku con effort basso | fatto, misurato dal vivo | `hooks/router.ts` |
+| **Router** (`auto`): Explore su Haiku con effort basso da qualsiasi modello superiore, Sonnet compreso; general-purpose su Sonnet da Opus o Fable. `prudent`: entrambi su Sonnet | fatto, misurato dal vivo (Sonnet e Haiku) | `hooks/router.ts` |
 | **Telemetria**: costo per richiesta, contesto, tempo, strumento in uso | fatto, costo verificato al centesimo sul costo reale della CLI | `hooks/telemetry.ts` |
 | **Prezzi aggiornati**: letti dalla pagina ufficiale di Anthropic una volta al giorno, salvati tra le sessioni; nessun prezzo nel codice | fatto, verificato dal vivo | `hooks/prices.ts` |
 | **Guardiano**: oltre il budget (o su Haiku oltre 100K di contesto) il sub-agente viene fermato e consegna quello che ha trovato | fatto, verificato dal vivo | `hooks/guard.ts` |
-| **Cache calda**: un ping poco prima che la cache della conversazione principale scada, finché dura la finestra dopo l'ultimo turno | fatto, verificato dal vivo | `hooks/cache.ts` |
+| **Cache calda** (`auto`): un ping poco prima che la cache scada, finché i ping di un'assenza costano meno di un quarto della riscrittura che evitano, fino a 8 ore; si adatta da sola a cache da 1 ora (abbonamento) e da 5 minuti (a consumo) | fatto, verificato dal vivo | `hooks/cache.ts` |
+| **Configurazione automatica**: rileva abbonamento o consumo, durata della cache e opzioni, e lo dice con un toast al primo turno | fatto | `hooks/setup.ts` |
 | **Pannello, banda, riga di stato**: un granchio vestito per modello, costo, risparmio, contesto, stato della cache | fatto, da verificare a occhio in Desktop | `hooks/ui.tsx` |
 | **Installazione pulita** dal marketplace GitHub | fatto, installazione provata dal marketplace locale | `.claude-plugin/marketplace.json`, `README.md` |
 
-Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dollari), `keepWarm` (30 minuti). Versione 0.2.0.
+Opzioni (`/plugin configure pennycrab`): `router` (`auto`), `budget` (2 dollari), `keepWarm` (`auto`). Versione 0.3.0.
 
 ## 2. Cosa è cambiato in questa sessione
 
@@ -27,6 +28,10 @@ Opzioni (`/plugin configure pennycrab`): `router` (`prudent`), `budget` (2 dolla
 7. **Prezzi dalla pagina ufficiale** (dopo la revisione): prima c'era un solo listino per famiglia, scritto nel codice, che sbagliava le versioni vecchie (claude-opus-5 costa 5/25 con lettura cache a 0,50, non 4/20 con 0,20; claude-sonnet-5 e claude-fable-5 hanno la lettura cache a 0,20 e 1,00). Ora pennycrab legge la tabella «Model pricing» di `platform.claude.com/docs/en/about-claude/pricing.md` all'avvio, al massimo una volta al giorno, e la tiene nello spazio permanente della mod. Se la pagina non risponde o cambia formato restano i prezzi tenuti; senza nessun listino il costo dei sub-agenti si legge `?`. Anche la soglia del prompt lungo di Haiku (100K) arriva dalla pagina.
 8. **Guardiano**: scatta solo se il sub-agente vuole continuare (chiede strumenti); uno che supera il budget con la risposta finale aveva già finito e non viene segnato come fermato.
 9. **Riga di stato**: `🦀?` per un modello sconosciuto, invece della `O` che si confondeva con Opus.
+10. **Cache calda per tutti** (0.3.0): la finestra fissa di 30 minuti non serviva a chi ha un abbonamento, la cui cache dura un'ora: chi stava via 1 ora e 5 minuti riscriveva tutto (con 200K token su Opus 5.5, 1,60 $ equivalenti) per non aver mandato un ping da 0,04 $. Ora `auto` continua i ping finché costano al massimo un quarto della riscrittura che evitano, fino a 8 ore: si adatta da sola a durata della cache e prezzi del modello.
+11. **Router `auto`** (0.3.0): Explore su Haiku da qualsiasi modello superiore. Misurato sullo stesso compito dei 32 file: Haiku ha descritto gli stessi file a 0,0126 $ contro 0,247 $ di Sonnet (−95%) e in 23,7 s contro 33,4 s. Chi lavora con Sonnet, prima escluso dal router, ora risparmia anche lui.
+12. **Guardiano solo sul budget** (0.3.0): tolto lo stop di Haiku oltre i 100K token: anche alla tariffa alta Haiku costa meno di qualunque altro modello, quindi fermarlo perdeva lavoro senza risparmiare.
+13. **Configurazione automatica** (0.3.0): al primo turno un toast dice cosa pennycrab ha rilevato e scelto (abbonamento o consumo, cache, router, budget) e come cambiarlo; si ripete solo se qualcosa cambia.
 
 ## 3. Scoperte sul motore (utili per i prossimi passi)
 
