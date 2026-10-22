@@ -1,159 +1,130 @@
-# pennycrab: stato, misure e piano
+# pennycrab: stato e piano
 
-Aggiornato il 22 ottobre 2026. Claude Code 2.1.308, branch `claude/elegant-fermat-ycm7rm`.
+Aggiornato il 22 ottobre 2026 · versione 0.3.0 · Claude Code 2.1.308 · branch `main`.
 
-## 1. Cosa fa la mod oggi
+Questo file è scritto per la **sessione locale** che riprende il lavoro sul PC di Simone, in Claude Desktop. La logica della mod è finita, misurata dal vivo e coperta da test. **Il prossimo lavoro è la UI**: renderla perfetta e curata per chi la usa ogni giorno. La sezione 2 è il brief completo; le sezioni 1 e 4 servono come contesto.
 
-| Funzione | Stato | Dove |
+## 1. Dove siamo
+
+| Parte | Cosa fa | Stato |
 | --- | --- | --- |
-| **Router** (`auto`): Explore su Haiku con effort basso da qualsiasi modello superiore, Sonnet compreso; general-purpose su Sonnet da Opus o Fable. `prudent`: entrambi su Sonnet | fatto, misurato dal vivo (Sonnet e Haiku) | `hooks/router.ts` |
-| **Telemetria**: costo per richiesta, contesto, tempo, strumento in uso | fatto, costo verificato al centesimo sul costo reale della CLI | `hooks/telemetry.ts` |
-| **Prezzi aggiornati**: letti dalla pagina ufficiale di Anthropic una volta al giorno, salvati tra le sessioni; nessun prezzo nel codice | fatto, verificato dal vivo | `hooks/prices.ts` |
-| **Guardiano**: oltre il budget (o su Haiku oltre 100K di contesto) il sub-agente viene fermato e consegna quello che ha trovato | fatto, verificato dal vivo | `hooks/guard.ts` |
-| **Cache calda** (`auto`): un ping poco prima che la cache scada, finché i ping di un'assenza costano meno di un quarto della riscrittura che evitano, fino a 8 ore; si adatta da sola a cache da 1 ora (abbonamento) e da 5 minuti (a consumo) | fatto, verificato dal vivo | `hooks/cache.ts` |
-| **Configurazione automatica**: rileva abbonamento o consumo, durata della cache e opzioni, e lo dice con un toast al primo turno | fatto | `hooks/setup.ts` |
-| **Pannello, banda, riga di stato**: un granchio vestito per modello, costo, risparmio, contesto, stato della cache | fatto, da verificare a occhio in Desktop | `hooks/ui.tsx` |
-| **Installazione pulita** dal marketplace GitHub | fatto, installazione provata dal marketplace locale | `.claude-plugin/marketplace.json`, `README.md` |
+| Router (`hooks/router.ts`) | `auto`: Explore su Haiku con effort basso da qualsiasi modello superiore; general-purpose su Sonnet da Opus o Fable. `prudent`: entrambi su Sonnet. `off` | finito, misurato |
+| Guardiano (`hooks/guard.ts`) | oltre il budget (2 $ di default) rifiuta gli strumenti del sub-agente con l'istruzione di consegnare; se insiste, dopo 2 richieste risponde la mod e il turno si chiude | finito, misurato |
+| Cache calda (`hooks/cache.ts`) | `auto`: un ping 45 s prima che la cache scada, finché i ping di un'assenza costano al massimo un quarto della riscrittura che evitano, fino a 8 ore. Si adatta da sola: un ping all'ora con l'abbonamento (cache da 1 ora), pochi ping a consumo (cache da 5 minuti) | finito, misurato |
+| Prezzi (`hooks/prices.ts`) | letti una volta al giorno dalla pagina ufficiale di Anthropic, salvati tra le sessioni; nessun prezzo nel codice | finito, verificato dal vivo |
+| Configurazione automatica (`hooks/setup.ts`) | al primo turno un toast dice cosa ha rilevato (abbonamento o consumo, cache, router, budget); si ripete solo se cambia | finito, testato |
+| Telemetria (`hooks/telemetry.ts`) | costo, contesto, tempo, strumento in uso per ogni sub-agente | finito |
+| **UI** (`hooks/ui.tsx`) | pannello, banda sopra il prompt, riga di stato, i 6 Clawd vestiti | **funziona, da rifinire: sezione 2** |
 
-Opzioni (`/plugin configure pennycrab`): `router` (`auto`), `budget` (2 dollari), `keepWarm` (`auto`). Versione 0.3.0.
+Verifiche: `claude plugin test .` (65 test), `claude plugin validate . --profile directory`, controllo dei tipi con `tsc` sui tipi del motore. Ogni regola importante ha un test che fallisce se la si rompe (provato rompendone 11).
 
-## 2. Cosa è cambiato in questa sessione
+## 2. Brief per la sessione locale: la UI
 
-1. **Guardiano anti-runaway**: rifiuta gli strumenti del sub-agente fermato con l'istruzione di scrivere la risposta finale; se insiste, alla terza richiesta risponde la mod e il turno si chiude. Un sub-agente ripreso ha di nuovo le sue 2 richieste per chiudere.
-2. **Cache calda**: TTL letto nello stesso ordine del motore; ping con `$.model.fork` 45 secondi prima della scadenza; nessun ping su una cache già scaduta; stop dei ping se un ping ha dovuto riscrivere più di metà del contesto; risparmio contabilizzato sul messaggio successivo, al netto del costo dei ping. Le ultime due regole vengono dalla prova dal vivo (sezione 5.4).
-3. **Bug corretto**: il toast «Pennycrab closed…» non compariva mai (`e.origin` è un oggetto `{ kind }`, non una stringa).
-4. **Test**: da 21 a 47. Coprono guardiano, cache (TTL in 9 casi, 6 ping in 30 minuti, nessun ping con cache da 1 ora, una riscrittura parziale non ferma i ping, una riscrittura di quasi tutto sì, nessun ping su una cache scaduta, a turno aperto o con l'opzione `off`), riga di stato, strumento in uso.
-5. **Pacchetto**: `marketplace.json`, `README.md`, autore, repository, licenza e parole chiave in `plugin.json`. La validazione passa anche con il profilo del catalogo dei plugin.
-6. **Tipi**: tolto dalla cache il campo `held`, di cui non si conosceva lo scopo; al suo posto i campi che servono alla cache calda (fine dell'ultimo turno, turno aperto, ping del tratto in corso, risparmio).
-7. **Prezzi dalla pagina ufficiale** (dopo la revisione): prima c'era un solo listino per famiglia, scritto nel codice, che sbagliava le versioni vecchie (claude-opus-5 costa 5/25 con lettura cache a 0,50, non 4/20 con 0,20; claude-sonnet-5 e claude-fable-5 hanno la lettura cache a 0,20 e 1,00). Ora pennycrab legge la tabella «Model pricing» di `platform.claude.com/docs/en/about-claude/pricing.md` all'avvio, al massimo una volta al giorno, e la tiene nello spazio permanente della mod. Se la pagina non risponde o cambia formato restano i prezzi tenuti; senza nessun listino il costo dei sub-agenti si legge `?`. Anche la soglia del prompt lungo di Haiku (100K) arriva dalla pagina.
-8. **Guardiano**: scatta solo se il sub-agente vuole continuare (chiede strumenti); uno che supera il budget con la risposta finale aveva già finito e non viene segnato come fermato.
-9. **Riga di stato**: `🦀?` per un modello sconosciuto, invece della `O` che si confondeva con Opus.
-10. **Cache calda per tutti** (0.3.0): la finestra fissa di 30 minuti non serviva a chi ha un abbonamento, la cui cache dura un'ora: chi stava via 1 ora e 5 minuti riscriveva tutto (con 200K token su Opus 5.5, 1,60 $ equivalenti) per non aver mandato un ping da 0,04 $. Ora `auto` continua i ping finché costano al massimo un quarto della riscrittura che evitano, fino a 8 ore: si adatta da sola a durata della cache e prezzi del modello.
-11. **Router `auto`** (0.3.0): Explore su Haiku da qualsiasi modello superiore. Misurato sullo stesso compito dei 32 file: Haiku ha descritto gli stessi file a 0,0126 $ contro 0,247 $ di Sonnet (−95%) e in 23,7 s contro 33,4 s. Chi lavora con Sonnet, prima escluso dal router, ora risparmia anche lui.
-12. **Guardiano solo sul budget** (0.3.0): tolto lo stop di Haiku oltre i 100K token: anche alla tariffa alta Haiku costa meno di qualunque altro modello, quindi fermarlo perdeva lavoro senza risparmiare.
-13. **Configurazione automatica** (0.3.0): al primo turno un toast dice cosa pennycrab ha rilevato e scelto (abbonamento o consumo, cache, router, budget) e come cambiarlo; si ripete solo se qualcosa cambia.
+### 2.1 Obiettivo
 
-## 3. Scoperte sul motore (utili per i prossimi passi)
+Chi apre il pannello deve capire **in due secondi** tre cose: quanto ha risparmiato, chi sta lavorando adesso (e su quale modello), se la cache è calda. Il resto (costo per riga, contesto, tempo) è lì quando lo cerca. Lo stile deve essere curato e coerente su Desktop chiaro e scuro e sul terminale.
 
-- **Non esiste `$.agent.stop`.** Un sub-agente si ferma in due modi: rifiutando i suoi strumenti in `tool.call` (`{ deny }`, il modello legge il testo come errore) e rispondendo al suo posto in `turn.step` (una risposta senza strumenti chiude il turno).
-- **Gli strumenti partono mentre la risposta arriva.** Le chiamate della stessa risposta che supera il budget vengono eseguite comunque; il guardiano agisce dalla risposta dopo.
-- **`$.model.fork`** rimanda l'ultima richiesta della conversazione principale con un messaggio in coda: legge il prefisso dalla cache e così ne rinnova la scadenza. È la base della cache calda. Dopo un solo turno può riscrivere una volta la parte dei messaggi, perché li rimanda come li tiene il transcript; dal secondo turno legge tutto.
-- **La cache è condivisa sull'account**: due sessioni con lo stesso prompt di sistema e gli stessi strumenti leggono la stessa voce per quella parte. Un ping di una sessione tiene viva quella parte anche per le altre.
-- **La CLI conta i ping nel costo della sessione** (`total_cost_usd`): il costo di un ping misurato dalla mod e quello della CLI coincidono.
-- **TTL della conversazione principale**, nell'ordine del motore: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, l'impostazione `promptCacheTtl`, `ENABLE_PROMPT_CACHING_1H`, poi l'account (1 ora con un abbonamento Claude entro i limiti, 5 minuti con chiave API, Bedrock, Vertex o Foundry). I sub-agenti scrivono a 5 minuti salvo `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` o `subagentPromptCacheTtl`.
-- **Un abbonamento si riconosce** dalle finestre `five_hour` e `seven_day` in `$.session.usage().rateLimits`; con una chiave API non ci sono.
-- **In modalità headless** il modulo della mod si carica all'inizio del primo turno, non all'avvio (aspetta un flag di rollout): nessun effetto pratico.
-- **I prezzi di Claude Code sono scritti nel suo codice**: la CLI calcola `/cost` da un catalogo incorporato («Hand-maintained baked-in model catalog»), aggiornato a ogni rilascio, più le tariffe aziendali `modelPricing`. Il catalogo che scarica da `downloads.claude.ai` serve al selettore dei modelli e non contiene prezzi. L'unica fonte pubblica e leggibile da una mod è la pagina ufficiale dei prezzi, che ha anche una versione Markdown.
-- **Kit di test**: gli hook vanno registrati prima della prima chiamata a `$`; una risposta finta a una chiamata su `$` va data come `{ value }`; il valore finale di uno stream `turn.step` si legge con `next()`, perché `for await` lo scarta; non si può simulare una chiusura del pannello fatta a mano.
+Il giudice è Simone, guardando il pannello vero in Desktop: niente si considera finito finché non l'ha visto lui.
 
-## 4. Verifiche
+### 2.2 Come lavorare
 
-| Verifica | Esito |
-| --- | --- |
-| `claude plugin test .` | 58 test, 0 falliti |
-| Test che falliscono se si rompe la regola che proteggono | provato su 7 regole (ripresa del sub-agente, ping a vuoto, turno aperto, soglia di riscrittura, guardiano sulla risposta finale, lettera di stato, fine della sezione dei prezzi) |
-| Prezzi dal vivo | il motore ha scaricato la pagina (200, 0,68 s), pennycrab ha letto 20 modelli e li ha salvati; i prezzi di ogni versione e la fascia lunga di Haiku corrispondono alla pagina |
-| `tsc` con i tipi del motore 2.1.308 | nessun errore |
-| `claude plugin validate .` e `--profile directory` | passa; resta solo l'avviso sull'icona |
-| Installazione da marketplace (`claude plugin marketplace add` + `install`) | installata e abilitata, 3 opzioni lette |
-| Prova dal vivo del guardiano | vedi 5.3 |
-| Prova dal vivo del router | vedi 5.1 |
-| Prova dal vivo della cache calda | vedi 5.4 |
-| **Non provati dal vivo** | il guardiano su Haiku oltre 100K, il router `aggressive`, la cache calda con la cache da 1 ora di un abbonamento (dove la finestra predefinita non fa ping), tutta la parte grafica |
+1. Aggiorna il clone locale: `git pull` su `main`, poi crea un branch per la UI.
+2. Carica la mod dalla cartella. In Desktop: `CLAUDE_CODE_PLUGIN_DIRS=~/progetti/pennycrab` e `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` nel blocco `env` di `~/.claude/settings.json`, poi riavvia l'app. In alternativa, la copia nella cartella delle mod della sessione, come prima. Ogni salvataggio ricarica la mod a fine turno.
+3. Per vedere ogni stato senza spendere: lancia un Explore in background per «running», abbassa il budget a 0,50 $ per «Guard», aspetta oltre la durata della cache per «Cache expired». Per gli stati difficili da provocare, aggiungi un test che monta il pannello (`$.ui.mount`) e controlla cosa disegna.
+4. **Tocca solo `hooks/ui.tsx`** (e i suoi test). Router, guardiano, cache, prezzi e telemetria sono finiti e misurati: se la UI ha bisogno di un dato nuovo, aggiungilo allo stato (`types/index.d.ts`) senza cambiare la logica.
+5. Prima di ogni push: `claude plugin test .` e `claude plugin validate .` verdi. Prima di cambiare il disegno, una bozza mostrata a Simone; dopo, la prova dal vivo.
 
-## 5. Misure reali
+### 2.3 Cosa c'è oggi
 
-Tutte con Claude Code 2.1.308 in modalità headless, costi a prezzi di listino come li calcola la CLI (`modelUsage.costUSD`). Un solo campione per prova: i numeri danno l'ordine di grandezza, non una media.
+| Superficie | Cosa disegna | Dove nel codice |
+| --- | --- | --- |
+| Pannello, Desktop | sfondo a puntini (pezzi alti al massimo 4096 px), 3 schede in alto (Cost, Saved, Main context), pulsante Collapse, riga della cache, sezioni Running · Guard · Finished, una riga SVG da 66 px per sub-agente (granchio, titolo, modello e da dove è stato spostato, strumento, contesto, costo, tempo, barra del contesto, segno di stato) | `renderPane`, `headSvg`, `rowSvg`, `paper` |
+| Pannello compatto, Desktop | una fila di granchi e i totali | `shelfSvg` |
+| Pannello, terminale | lo stesso in testo, con barre `█░` | `renderPane`, ramo terminale |
+| Banda sopra il prompt | fino a 5 granchi da 24 px, «N running · M handover», barra del contesto principale, «saved $X», pulsanti ×N e ✕ | `renderBand`, `bandSvg` |
+| Riga di stato | `🦀S 21% 1m59s` per al massimo due sub-agenti, poi «🦀 saved $X» | `statusLine`, `tick` |
+| Toast | configurazione al primo turno, chiusura del pannello, guardiano scattato | `setup.ts`, `register.ts`, `guard.ts` |
+| Granchi | i 6 Clawd vestiti approvati: Haiku fattorino, Sonnet esploratore, Opus banchiere, Fable re, Pennycrab con la moneta (modello sconosciuto), Guardiano (fermato) | `COSTUMES`, `crab` |
 
-### 5.1 Router: lo stesso Explore su Sonnet e su Opus
+### 2.4 Cosa sappiamo già di Desktop
 
-Compito: leggere per intero i 32 file `.js` di `npm/lib/utils` (circa 119 KB) e descriverli. Sessione principale su Opus in entrambi i casi.
+Queste cose sono costate tentativi: non rifarli.
 
-| | Router `prudent` (Explore su Sonnet) | Router `off` (Explore su Opus) | Differenza |
-| --- | --- | --- | --- |
-| File coperti | 32 su 32 | 32 su 32 | uguale |
-| Costo del sub-agente | 0,247 $ | 0,509 $ | **−51%** |
-| Costo totale della prova | 0,580 $ | 0,839 $ | **−31%** |
-| Tempo del sub-agente | 33,4 s | 56,2 s | **−41%** |
-| Tempo totale | 49,8 s | 68,5 s | **−27%** |
-| Richieste del sub-agente | 3 | 5 | |
-| Chiamate a strumenti | 33 | 33 | |
+- **Desktop mette gli elementi fratelli su righe separate**: per un layout orizzontale serve un solo `Svg` per riga.
+- **Su Desktop `$.ui.invalidate` non arriva alla banda**: si ridisegna scrivendo un valore di stato che il disegno legge (l'atomo `now`, aggiornato ogni secondo mentre lavorano sub-agenti, ogni 15 s mentre la cache conta).
+- **La banda vuota del motore** (`{ type: 'engine' }`) non va messa dentro la nostra: Desktop scarta tutta la banda.
+- **Un `Svg` alto più di 4096 px** non viene accettato: lo sfondo va a pezzi.
+- **Il terminale elenca `Svg` ma non lo disegna**: si controlla sempre `e.surface`.
+- **La riga di stato di pennycrab compare sopra quella di Claude**: è voluto, non va spostata.
+- Le indicazioni di Simone: nessuna dipendenza da altre mod, si prende spunto da mod che funzionano (savvy-progress, session-band) ma il codice è nostro; i granchi restano Clawd chiaramente vestiti, perché Clawd è la mascotte di Anthropic.
 
-Il «Saved» che mostra pennycrab per la prova A è 0,247 $ (prezzi Opus esattamente doppi di Sonnet sugli stessi token); il risparmio reale misurato è 0,262 $. La stima della mod è quindi prudente, del 6% sotto il reale.
+### 2.5 Problemi da risolvere
 
-### 5.2 Precisione dei prezzi
+*In arrivo: i problemi della UI trovati dalla revisione del codice in corso, verificati uno per uno.*
 
-Il costo del sub-agente Sonnet calcolato con la formula di `prices.ts` (scritture cache a 5 minuti) è **0,2473 $, identico al centesimo** a quello della CLI. Anche la conferma che i sub-agenti scrivono a 5 minuti viene dal transcript.
+### 2.6 Direzione di design
 
-### 5.3 Guardiano dal vivo
+- **Gerarchia**: in alto un solo numero grande, il risparmio della sessione, con sotto il costo; il contesto principale come barra sottile. Le schede tutte uguali oggi danno lo stesso peso a tre cose che non pesano uguale.
+- **Cache visibile**: la riga di testo diventa un piccolo elemento grafico (stato caldo, in uso o scaduto; tempo residuo; numero e costo dei ping), con le parole giuste per l'abbonamento («ping orari, fino a 8 h») e per il consumo.
+- **Abbonamento**: dove si mostrano dollari a un abbonato, dire che sono equivalenti a listino e che contano sui limiti (una nota sottile, non un'etichetta su ogni numero).
+- **Righe**: modello e granchio sono l'informazione principale; «↓ from Opus» e «low» come chip leggeri; il costo `?` (prezzi mai scaricati) spiegato con un hover.
+- **Colori**: un colore per modello, uguale in pannello, banda e riga di stato; verde solo per i risparmi, ambra solo per il guardiano; tutto leggibile in chiaro e in scuro (oggi i colori dei modelli sono fissi e il tema scuro passa solo per alcune classi CSS).
+- **Movimento**: solo i granchi al lavoro camminano; nessuna animazione se il sistema chiede movimento ridotto (già così: va mantenuto).
+- **Larghezze**: il pannello da 240 a 900 px, la banda fino a 1600 px; niente testo tagliato senza `…`, niente sovrapposizioni.
 
-Budget 0,50 $, Explore su tutti i 109 file di `npm/lib`, su Sonnet.
+### 2.7 Criteri di accettazione
 
-- Superato il budget arriva il toast `Pennycrab handed over "Survey npm lib": it reached its $0.50 budget.`
-- Le 12 letture chieste nella risposta successiva vengono tutte rifiutate con il messaggio del guardiano.
-- Al passo dopo il sub-agente scrive la risposta finale: 97 file letti su 109, con l'elenco dei 12 mancanti. Lo stop forzato non è servito.
-- Costo totale della prova: 0,88 $, sessione principale compresa.
+- [ ] Pannello vuoto: dice cosa farà la mod, non solo «No subagents yet».
+- [ ] Un sub-agente al lavoro: granchio che cammina, modello, strumento in uso, tempo che scorre.
+- [ ] Tre sub-agenti insieme, uno fermato dal guardiano: sezioni chiare, il Guardiano con «⚑ over budget».
+- [ ] Cache: calda (con il tempo residuo), in uso, scaduta, con ping; parole diverse per abbonamento e consumo.
+- [ ] Prezzi mai scaricati: `?` spiegato.
+- [ ] Banda: leggibile a 24 px, i dettagli dei granchi riconoscibili o semplificati.
+- [ ] Riga di stato: lettera del modello corretta, `?` per i modelli sconosciuti.
+- [ ] Tema chiaro e scuro su Desktop; terminale stretto (40 colonne) e largo.
+- [ ] Movimento ridotto rispettato.
+- [ ] Test e validazione verdi; Simone ha visto e approvato ogni stato.
 
-### 5.4 Cache calda dal vivo
+## 3. Altri passi, non UI
 
-Sessione su Sonnet tenuta aperta, cache forzata a 5 minuti (`FORCE_PROMPT_CACHING_5M=1`), `keepWarm` a 30 minuti contro `off`.
+1. Installazione pulita dal marketplace: `/plugin install pennycrab --marketplace Batman110391/pennycrab` (in Desktop: **+** → Plugins → Add marketplace → Add plugin), dopo aver tolto `CLAUDE_CODE_PLUGIN_DIRS`.
+2. Un controllo automatico su GitHub che a ogni push lanci test e validazione.
+3. Un'icona disegnata da zero (non Clawd) per il catalogo dei plugin.
+4. Da valutare: le tariffe aziendali `modelPricing`, il sovrapprezzo 1,1× per l'inferenza solo negli USA, i ping durante i comandi molto lunghi.
 
-**Prova principale**: conversazione di 3 messaggi; il primo legge 5 file e porta il contesto a 61K token; dopo il secondo, una pausa di 8 minuti e 40 secondi, poi il terzo.
+## 4. Misure e scoperte
 
-| Terzo messaggio dopo la pausa | Con i ping | Senza ping (misurato) | Senza ping (nessuna cache condivisa) |
-| --- | --- | --- | --- |
-| Token letti / scritti in cache | 61.140 / 64 | 27.148 / 34.023 | 0 / ~61.200 |
-| Costo del messaggio | 0,0063 $ | 0,0878 $ | ~0,153 $ |
-| Costo dei ping | 2 × 0,0064 $ | | |
-| **Totale** | **0,0190 $** | **0,0878 $** | **~0,153 $** |
-| Tempo alla prima risposta (TTFT) | 1,8 s | 3,5 s | |
+Tutte con Claude Code 2.1.308 in modalità headless, costi a listino come li calcola la CLI. Un campione per prova.
 
-- **Ogni ping ha letto tutta la conversazione** (61.081 e 61.140 token letti, 59 e 0 scritti), in 1,3–3,7 secondi. Un ping è costato 1/24 di una riscrittura, come prevede il listino (lettura a 0,1 $ per milione contro scrittura a 2,5 $ su Sonnet).
-- **Risparmio sul messaggio di ritorno: −78% misurato, −88% senza cache condivisa.** Il «Saved» che pennycrab calcola per questa sessione, con la formula verificata dai test, è 0,134 $ (riscrittura evitata meno i ping), cioè il caso senza cache condivisa; in modalità headless il pannello non si vede, quindi non l'ho letto lì.
-- **Perché il «senza ping» ha letto 27K token:** la parte iniziale della richiesta (prompt di sistema e strumenti) era identica nelle due sessioni e la cache è condivisa sullo stesso account; i ping della sessione calda l'hanno tenuta viva anche per l'altra. Nell'uso reale, altre sessioni aperte possono fare lo stesso: in quel caso il «Saved» di pennycrab sovrastima un po'.
+### 4.1 Misure dal vivo
 
-**Prima prova**, con un solo turno (35K token) e 6 minuti e 40 secondi di pausa: il ping ha letto 27K token e ne ha **riscritti 7,8K** (la parte dei messaggi), 0,022 $; il messaggio dopo ha letto tutti i 34.793 token e ne ha scritti 65. La riscrittura succede una volta sola: il fork rimanda la conversazione come la tiene il transcript, che dopo il primo turno può differire da come era partita la prima richiesta. Da qui le due correzioni al keep-warm: nessuno stop per una riscrittura parziale, nessun ping su una cache già scaduta. Il TTFT di quella prova (2,9 s con i ping, 2,1 s senza) non mostra differenze: a 35K token il tempo è rumore.
+| Prova | Senza pennycrab | Con pennycrab |
+| --- | --- | --- |
+| Explore su 32 file da una sessione Opus | 0,509 $, 56,2 s (su Opus) | 0,013 $, 23,7 s (su Haiku), stessi file descritti |
+| Lo stesso Explore su Sonnet | 0,247 $, 33,4 s | 0,013 $, 23,7 s |
+| Messaggio dopo 8 min 40 s di pausa, 61K token, cache da 5 min | 0,088 $ misurato, ~0,153 $ senza cache condivisa; risposta in 3,5 s | 0,019 $ con 2 ping; risposta in 1,8 s |
+| Explore su 109 file con budget 0,50 $ | nessun tetto | fermato al budget, 97 file letti e consegnati con l'elenco dei 12 mancanti |
+| Prezzi | | stima di pennycrab uguale al centesimo al costo della CLI |
+| Prezzi dal vivo | | pagina scaricata in 0,68 s, 20 modelli letti e salvati |
+| Tempo aggiunto | | 5–6 ms per chiamata a strumento |
 
-Costo di tutte le prove dal vivo: circa 2,83 $ a prezzi di listino.
+*In arrivo: la prova dal vivo di un'assenza di 1 ora e 5 minuti con un abbonamento, con e senza cache calda.*
 
-### 5.5 Quanto costa la mod in tempo
+### 4.2 Scoperte sul motore
 
-Per ogni chiamata a uno strumento di un sub-agente, pennycrab aggiunge una mediana di **5,4–5,9 ms** (p90 6,4–7,9 ms, 64 chiamate misurate). Su un Explore di 33–56 secondi con 33 strumenti sono circa 0,2 secondi, meno dello 0,5%.
+- **Non esiste `$.agent.stop`**: un sub-agente si ferma rifiutandogli gli strumenti in `tool.call` e rispondendo al suo posto in `turn.step`.
+- **Gli strumenti partono mentre la risposta arriva**: le chiamate della risposta che supera il budget vengono eseguite comunque.
+- **`$.model.fork`** rimanda l'ultima richiesta della conversazione principale con un messaggio in coda: legge la cache e così la rinnova. Non fa scattare gli hook di turno, quindi non conta come un tuo turno. Dopo un solo turno può riscrivere una volta la parte dei messaggi.
+- **La cache è condivisa sull'account** per la parte identica (prompt di sistema e strumenti): un ping di una sessione la tiene viva anche per le altre.
+- **TTL**: `FORCE_PROMPT_CACHING_5M`, poi `CLAUDE_CODE_PROMPT_CACHE_TTL`, poi `promptCacheTtl`, poi `ENABLE_PROMPT_CACHING_1H`, poi l'account (1 ora con un abbonamento entro i limiti). Un abbonamento si riconosce dalle finestre `five_hour` e `seven_day` in `$.session.usage().rateLimits`.
+- **Claude Code stesso ha i prezzi scritti nel codice** e li aggiorna a ogni rilascio; il catalogo che scarica serve al selettore dei modelli. L'unica fonte pubblica leggibile da una mod è la pagina dei prezzi in Markdown.
+- **Explore**: gira sul modello della sessione; con Fable gira su Opus.
+- **Kit di test**: gli hook vanno registrati prima della prima chiamata a `$`; le risposte finte alle chiamate su `$` sono `{ value }`; il valore finale di uno stream si legge con `next()`; un `advance` dell'orologio risolve al massimo 10.000 attese; un test lungo chiede `timeoutMs`.
 
-## 6. Cosa vale in pratica
+### 4.3 Limiti noti
 
-Stime costruite sulle misure sopra; un solo campione per prova, quindi ordini di grandezza.
-
-**Router** (attivo di default, per chi lavora su Opus o Fable):
-- per un Explore come quello misurato: **−0,26 $ e −23 secondi**, con lo stesso risultato;
-- con 10 Explore al giorno: circa **2,6 $ e 4 minuti** al giorno; il costo del sub-agente si dimezza sempre, perché Sonnet costa metà di Opus su ogni tipo di token.
-
-**Cache calda** (conta per chi ha la cache a 5 minuti: chiave API, Bedrock, Vertex, Foundry, o un abbonamento oltre i limiti):
-- ogni volta che torni dopo una pausa fra 5 e 30 minuti risparmi la riscrittura del contesto, meno i ping: **0,13 $ con 61K token su Sonnet**, **circa 0,88 $ con 200K token su Opus** (riscrittura 0,96 $, 2 ping 0,08 $);
-- se non torni, i ping costano: con 200K token su Opus e la finestra di 30 minuti sono 6 ping, circa 0,24 $. Conviene se torni almeno una volta su quattro;
-- con un abbonamento entro i limiti la cache dura già 1 ora: la finestra di 30 minuti non fa partire nessun ping e non costa nulla.
-
-**Guardiano**: il risparmio dipende da quanto avrebbe speso il sub-agente fuori controllo. Nella prova si è fermato a 97 file su 109 consegnando quello che aveva; il valore è il tetto alla spesa, non una percentuale.
-
-**Prezzo in tempo della mod**: circa 5–6 ms per chiamata a uno strumento, meno dello 0,5% di un Explore.
-
-Con un abbonamento i dollari sono l'equivalente a listino: il beneficio reale è sull'utilizzo dei limiti, non sulla bolletta.
-
-## 7. Limiti noti
-
-- **Il guardiano non può fermare le chiamate della risposta che supera il budget**: partono mentre la risposta arriva. Il costo oltre il budget è al massimo una risposta e i suoi strumenti, più le 2 richieste per chiudere.
-- **I ping per una sessione abbandonata sono una spesa**: con la cache da 5 minuti e la finestra di 30 minuti sono 6 ping. Il pannello li mostra, ma non vengono sottratti dal «Saved» finché non torni.
-- **Il «Saved» della cache sovrastima un po' quando altre sessioni** con lo stesso prompt di sistema tengono viva la parte iniziale: senza ping quella parte sarebbe stata letta lo stesso.
-- **Il «Saved» del router è leggermente prudente**: assume che Opus avrebbe usato gli stessi token; nella prova Opus ne ha usati di più (risparmio reale 0,262 $, stimato 0,247 $).
-- **Durante un turno lungo non si fanno ping** (per esempio un comando di 10 minuti): una cache da 5 minuti può scadere lì in mezzo.
-- **I prezzi dipendono dal formato della pagina ufficiale**: se Anthropic cambia la tabella, pennycrab non la accetta e tiene l'ultimo listino buono; il costo totale della sessione resta comunque quello di Claude Code.
-- **Non contati**: le tariffe aziendali `modelPricing` e il sovrapprezzo di 1,1× per l'inferenza solo negli USA (`inference_geo`), che le richieste non dichiarano alla mod.
-- **Il contesto dei sub-agenti** è misurato su una finestra fissa di 1M, che vale per tutti i modelli 5.x.
-- **Icona**: non c'è. Il granchio è derivato da Clawd, la mascotte di Anthropic, quindi per un'icona pubblica conviene un disegno proprio.
-
-## 8. Prossimi passi
-
-1. **Tu: prove visive in Desktop** (punto 3 del piano precedente): riga «Guard» con il Guardiano e «⚑ over budget», banda con «handover», riga «Cache warm · …» nel pannello, toast alla chiusura del pannello, apertura del pannello a ogni ondata, dettagli dei granchi a 24 px.
-2. **Unire `claude/elegant-fermat-ycm7rm` in `main`**: il marketplace legge il branch principale.
-3. **Installare in modo pulito**: `/plugin install pennycrab --marketplace Batman110391/pennycrab` (in Desktop: **+** → Plugins → Add marketplace → Add plugin), dopo aver tolto `CLAUDE_CODE_PLUGIN_DIRS` se l'avevi rimesso.
-4. **Facoltativi**: un'icona propria, le tariffe aziendali `modelPricing`, un controllo automatico su GitHub (test e validazione a ogni push), un avviso la prima volta che parte un ping, ping anche durante i turni molto lunghi.
+- Il guardiano non ferma le chiamate della risposta che supera il budget.
+- I ping per una sessione abbandonata sono una spesa, limitata da `auto` a un quarto di una riscrittura.
+- Il «Saved» della cache sovrastima un po' quando altre sessioni tengono viva la parte comune; quello del router è prudente.
+- Nessun ping durante un turno lungo.
+- Non contati: tariffe aziendali `modelPricing` e sovrapprezzo 1,1× per l'inferenza solo negli USA.
