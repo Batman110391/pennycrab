@@ -13,7 +13,16 @@ const hours = (ms: number) => (ms >= 3600_000 ? `${ms / 3600_000} h` : `${ms / 6
 // built-in subagents run, and the spend cap.
 export function setupLine(c: Pick<Cache, 'ttlMs' | 'ttlSource'>, { router, budgetUsd, warm }: Choice) {
   const isHour = c.ttlMs !== null && c.ttlMs >= 3600_000
-  const who = c.ttlSource === 'auth' ? (isHour ? 'your Claude subscription' : 'pay-per-token use') : 'your cache setting'
+  const WHO: Record<Cache['ttlSource'], string> = {
+    plan: 'your Claude subscription',
+    'plan-over': 'your Claude subscription, past its limits',
+    api: 'pay-per-token use',
+    cloud: 'your cloud provider',
+    env: 'your cache setting',
+    setting: 'your cache setting',
+    unknown: 'this session',
+  }
+  const who = WHO[c.ttlSource]
   const cache =
     c.ttlMs === null
       ? 'prompt caching is off'

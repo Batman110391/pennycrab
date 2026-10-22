@@ -57,9 +57,9 @@ export async function ttlOf($: EngineInterface): Promise<Pick<Cache, 'ttlMs' | '
   }
   const isCloud = isBedrock || Boolean((await $.env.get('CLAUDE_CODE_USE_VERTEX')) || (await $.env.get('CLAUDE_CODE_USE_FOUNDRY')))
   const { rateLimits } = await $.session.usage()
-  const isPlan = !isCloud && rateLimits.some(r => r.kind === 'five_hour' || r.kind === 'seven_day')
-  const isOver = rateLimits.some(r => r.percentUsed >= 100)
-  return { ttlMs: TTL[isPlan && !isOver ? '1h' : '5m'], ttlSource: 'auth' }
+  if (isCloud) return { ttlMs: TTL['5m'], ttlSource: 'cloud' }
+  if (!rateLimits.some(r => r.kind === 'five_hour' || r.kind === 'seven_day')) return { ttlMs: TTL['5m'], ttlSource: 'api' }
+  return rateLimits.some(r => r.percentUsed >= 100) ? { ttlMs: TTL['5m'], ttlSource: 'plan-over' } : { ttlMs: TTL['1h'], ttlSource: 'plan' }
 }
 
 export async function onMainTurnStart($: EngineInterface) {

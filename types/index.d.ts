@@ -42,7 +42,9 @@ export type Savings = {
 export type Cache = {
   // Its lifetime and what decided it, as of the last turn; null when the session caches nothing.
   ttlMs: number | null
-  ttlSource: 'setting' | 'env' | 'auth' | 'unknown'
+  // env or setting: a variable or setting chose it; else the account did: a subscription within its limits (plan),
+  // one past them (plan-over), pay-per-token (api), a cloud provider (cloud).
+  ttlSource: 'setting' | 'env' | 'plan' | 'plan-over' | 'api' | 'cloud' | 'unknown'
   // The main thread's last request, a ping's included: its entry lives ttlMs from here.
   lastRequestAt: number | null
   // The end of the person's last turn: the keep-warm window runs from here.

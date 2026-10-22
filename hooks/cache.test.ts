@@ -22,7 +22,7 @@ test('the keep-warm option reads as a window after the last turn, auto (the defa
 })
 
 test('a ping is due 45s before a 5-minute entry lapses, and never while a 1-hour entry outlasts the window', () => {
-  const idle: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, ttlSource: 'auth', lastRequestAt: T0, lastTurnAt: T0 }
+  const idle: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, ttlSource: 'api', lastRequestAt: T0, lastTurnAt: T0 }
   expect(pingDueAt(idle, 30 * MIN)).toBe(T0 + 5 * MIN - 45_000)
   // The last entry already reaches past the window's end: no ping.
   expect(pingDueAt({ ...idle, lastRequestAt: T0 + 26 * MIN }, 30 * MIN)).toBeUndefined()
@@ -231,4 +231,16 @@ test('pay-per-token use is told its 5-minute cache is kept warm as long as the p
   await start($)
   await turn($, 'm1')
   expect(toasts[0]).toContain('set for pay-per-token use: 5-minute cache, pings while you are away as long as they pay for themselves')
+})
+
+test('a subscription past its limits is told so, with the 5-minute cache it then has', async ($: Engine, on) => {
+  const toasts: string[] = []
+  engine(on, { rateLimits: [{ kind: 'five_hour', percentUsed: 100 }] })
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  await start($)
+  await turn($, 'm1')
+  expect(toasts[0]).toContain('set for your Claude subscription, past its limits: 5-minute cache')
 })
