@@ -17,6 +17,13 @@
       "description": "The most one subagent may spend before the guard asks it to hand back what it found; a Haiku subagent is handed over too once its context passes 100K tokens, where it bills at its long-prompt rate. off: no guard.",
       "options": ["0.50", "1", "2", "5", "off"],
       "default": "2"
+    },
+    "keepWarm": {
+      "type": "string",
+      "title": "Keep the prompt cache warm",
+      "description": "How long after your last turn the main conversation's prompt cache is kept warm, by a short ping just before it would expire. A ping reads the cache, a 25th of the price of writing it again on a 5-minute cache; on a 1-hour cache no ping is needed within an hour. off: no pings.",
+      "options": ["off", "15m", "30m", "1h", "2h"],
+      "default": "30m"
     }
   }
 }

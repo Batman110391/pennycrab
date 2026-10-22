@@ -38,13 +38,25 @@ export type Savings = {
   routed: number
 }
 
+// The main thread's prompt cache, as the keep-warm sees it.
 export type Cache = {
+  // Its lifetime and what decided it, as of the last turn; null when the session caches nothing.
   ttlMs: number | null
   ttlSource: 'setting' | 'env' | 'auth' | 'unknown'
+  // The main thread's last request, a ping's included: its entry lives ttlMs from here.
   lastRequestAt: number | null
+  // The end of the person's last turn: the keep-warm window runs from here.
+  lastTurnAt: number | null
+  isTurnOpen: boolean
+  // A ping found nothing to keep (the entry had lapsed, or nothing to fork): no more until the next turn.
+  isHalted: boolean
+  // Pings since the last turn and what they cost, settled when the next turn reads the cache.
+  stretchPings: number
+  stretchUsd: number
+  // Since the session began; savedUsd is the re-writes the pings spared less every ping's cost.
   pings: number
   pingUsd: number
-  held: { text: string; at: number } | null
+  savedUsd: number
 }
 
 export type Ui = {

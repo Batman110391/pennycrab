@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 
-import type { Agent, Tier } from '../types'
-import { NO_MAIN, NO_SAVINGS, UI_START } from './state'
+import type { Agent, Cache, Tier } from '../types'
+import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
 export const PANE = 'pennycrab'
 const TITLE = 'Pennycrab'
@@ -11,6 +11,7 @@ const agents = atom({ plugin: 'pennycrab', key: 'agents' } as const, [])
 const main = atom({ plugin: 'pennycrab', key: 'main' } as const, NO_MAIN)
 const savings = atom({ plugin: 'pennycrab', key: 'savings' } as const, NO_SAVINGS)
 const ui = atom({ plugin: 'pennycrab', key: 'ui' } as const, UI_START)
+const cache = atom({ plugin: 'pennycrab', key: 'cache' } as const, NO_CACHE)
 // Drawings are redrawn when a value they read changes; on the desktop an invalidate never reaches the band.
 const now = atom({ plugin: 'pennycrab', key: 'now' } as const, 0)
 
@@ -278,6 +279,19 @@ const textBar = (pct: number, width: number) => {
   return '█'.repeat(full) + '░'.repeat(Math.max(0, width - full))
 }
 
+// One line on the main thread's prompt cache: how long it stays warm, and what keeping it so cost.
+const CACHE_TICK_MS = 15_000
+export function cacheLine(c: Cache, at: number) {
+  if (c.ttlMs === null || c.lastRequestAt === null) return undefined
+  const left = c.lastRequestAt + c.ttlMs - at
+  const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${Math.ceil(left / 60_000)}m left` : 'Cache expired'
+  const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtUsd(c.pingUsd)}` : ''
+  return state + pings
+}
+// The line's minutes move on while the person is away: until a tick after the entry lapses.
+const isCacheCounting = (c: Cache, at: number) =>
+  !c.isTurnOpen && c.ttlMs !== null && c.lastRequestAt !== null && at <= c.lastRequestAt + c.ttlMs + CACHE_TICK_MS
+
 // --- what the hooks call
 
 async function view($: EngineInterface) {
@@ -285,15 +299,16 @@ async function view($: EngineInterface) {
   const m = await read($, main)
   const s = await read($, savings)
   const u = await read($, ui)
-  const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
+  const c = await read($, cache)
+  const at = Math.max(await read($, now), ...list.map(a => a.startedAt), c.lastRequestAt ?? 0, 0)
   const mainPct = m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0
-  return { list, m, s, u, at, mainPct }
+  return { list, m, s, u, at, mainPct, cacheText: cacheLine(c, at) }
 }
 
 export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const { list, m, s, u, at, mainPct } = await view($)
+  const { list, m, s, u, at, mainPct, cacheText } = await view($)
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
   const done = list.filter(a => !isLive(a) && !isGuarded(a)).reverse()
@@ -320,7 +335,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Svg key={a.id} source={rowSvg(w, a, at)} alt={`${a.description}: ${NAME[a.tier]}, ${a.status}, context ${ctxOf(a)}%`} width={w} height={ROW_H} />
     )
     // A Text or Button line is about 20px on the desktop: the paper counts 24 so it never ends short.
-    const lines = 1 + Number(list.length === 0) + Number(running.length > 0) + Number(guarded.length > 0) + Number(done.length > 0)
+    const lines = 1 + Number(cacheText !== undefined) + Number(list.length === 0) + Number(running.length > 0) + Number(guarded.length > 0) + Number(done.length > 0)
     const rows = running.length + guarded.length + (u.isDoneOpen ? done.length : 0)
     return (
       <Box flexDirection="column">
@@ -331,6 +346,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
         <Box flexDirection="column" position="absolute" top={0} left={0} right={0}>
           <Svg source={headSvg(w, m.costUsd, s.usd, mainPct)} alt={summary} width={w} height={HEAD_H} />
           {collapse}
+          {cacheText !== undefined && <Text dimColor>{cacheText}</Text>}
           {list.length === 0 && <Text dimColor>No subagents yet. They show up here as they start.</Text>}
           {running.length > 0 && <Text dimColor>{`Running · ${running.length}`}</Text>}
           {running.map(row)}
@@ -365,6 +381,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
         <Text dimColor>{summary}</Text>
         {collapse}
       </Box>
+      {cacheText !== undefined && <Text dimColor>{cacheText}</Text>}
       {u.isCompact ? (
         <Text wrap="truncate-end">
           {list.map(a => (
@@ -446,11 +463,13 @@ function statusLine(list: Agent[], saved: number, at: number) {
 }
 
 let shownStatus: string | undefined
-// Each second: while subagents run the clock the drawings read moves on, and the status line follows.
+// Each second: while subagents run the clock the drawings read moves on, and the status line follows; while the
+// cache counts down, every CACHE_TICK_MS.
 export async function tick($: EngineInterface) {
   const list = await read($, agents)
   const at = await $.clock.now()
-  if (list.some(isLive)) await update($, now, () => at)
+  const isCounting = isCacheCounting(await read($, cache), at) && at - (await read($, now)) >= CACHE_TICK_MS
+  if (list.some(isLive) || isCounting) await update($, now, () => at)
   const line = statusLine(list, (await read($, savings)).usd, at)
   if (line !== shownStatus) $.ui.status((shownStatus = line))
 }

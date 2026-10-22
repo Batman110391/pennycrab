@@ -1,5 +1,7 @@
 import type { Register } from 'claude-code'
 
+import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from './cache'
+import type { KeepWarm } from './cache'
 import { answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
 import type { Budget } from './guard'
 import { spawnRouted, withRoutedEffort } from './router'
@@ -12,10 +14,14 @@ import { onSpawnUi, renderBand, renderPane, tick, togglePane } from './ui'
 export const register: Register = (on, options) => {
   const mode = (options.router as RouterMode | undefined) ?? 'prudent'
   const budgetUsd = budgetOf(options.budget as Budget | undefined)
+  const warmMs = keepWarmOf(options.keepWarm as KeepWarm | undefined)
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
-    $.clock.every(1000, () => void tick($))
+    $.clock.every(1000, () => {
+      void tick($)
+      void keepWarm($, warmMs).catch(() => undefined)
+    })
     return next(e)
   })
 
@@ -40,12 +46,18 @@ export const register: Register = (on, options) => {
     return started
   }).catch(($, e, next) => next(e))
 
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await onMainTurnStart($)
+    return next(e)
+  })
+
   on('turn.step', async function* ($, e, next) {
     const stop = await stopOf($, e.agentId, budgetUsd)
     if (stop !== undefined) return yield* answerAlone(e, stop)
     const result = yield* next(withRoutedEffort(e))
     if (result.usage) {
       await recordStep($, e.agentId, e.model, result.usage)
+      if (e.agentId === undefined) await onMainStep($, e.model, result.usage)
       await guardStep($, e.agentId, budgetUsd)
     }
     return result
@@ -66,6 +78,8 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined) {
       await finish($, e.agentId, e.reason)
       forget(e.agentId)
+    } else {
+      await onMainTurnEnd($)
     }
     return next(e)
   })
