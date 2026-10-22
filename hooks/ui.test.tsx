@@ -103,3 +103,48 @@ test('the pane opens once per wave of subagents, not on every spawn', async ($: 
   await spawn('Two')
   expect(opened).toBe(1)
 })
+
+test('the status line counts a running subagent each second, then clears once it ends with nothing saved', async ($: Engine, on) => {
+  const lines: (string | undefined)[] = []
+  const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
+  mock.env(on, { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5-5' })
+  on('agent.spawn', async (_$, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'a1' }) as never)
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
+  on('ui.status', async (_$, e) => {
+    lines.push(e.text)
+    return { value: undefined } as never
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  on('session.start', async () => ({ cwd: '/repo' }) as never)
+  await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Look', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  await clock.advance(3000)
+  await $.turn.complete({ reason: 'answer', answer: 'found it', durationMs: 3000, isAborted: false, turnId: 'x', agentId: 'a1' })
+  await clock.advance(1000)
+  // A set CLAUDE_CODE_SUBAGENT_MODEL keeps the router out: the row is Sonnet's, and nothing was saved.
+  expect(lines).toEqual(['🦀S 0% 1s', '🦀S 0% 2s', '🦀S 0% 3s', undefined])
+})
+
+test('a subagent running a tool shows it on its row, then goes back to running', async ($: Engine, on) => {
+  let release = () => {}
+  const held = new Promise<void>(r => (release = r))
+  let isInside = false
+  on('tool.call', async () => {
+    isInside = true
+    await held
+    return { result: 'ok' } as never
+  })
+  await session($, on)
+  const call = $.tool.call({ tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' })
+  for (let i = 0; i < 100 && !isInside; i++) await Promise.resolve()
+  const during = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', ...PANE })
+  const busy = (await during.findAll({ type: 'Text', text: /▶ Read/ })).length
+  await during.unmount()
+  release()
+  await call
+  const after = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', ...PANE })
+  const idle = (await after.findAll({ type: 'Text', text: /▶ Read/ })).length
+  await after.unmount()
+  expect({ isInside, busy, idle }).toEqual({ isInside: true, busy: 1, idle: 0 })
+})
