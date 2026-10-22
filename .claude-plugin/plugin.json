@@ -2,6 +2,10 @@
   "name": "pennycrab",
   "version": "0.1.0",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
+  "author": { "name": "Batman110391" },
+  "repository": "https://github.com/Batman110391/pennycrab",
+  "license": "MIT",
+  "keywords": ["subagents", "cost", "prompt-cache", "router", "pane"],
   "types": "./types/index.d.ts",
   "userConfig": {
     "router": {

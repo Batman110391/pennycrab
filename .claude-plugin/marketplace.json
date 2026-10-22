@@ -1,0 +1,6 @@
+{
+  "name": "pennycrab",
+  "description": "pennycrab: a Claude Code mod that routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
+  "owner": { "name": "Batman110391" },
+  "plugins": [{ "name": "pennycrab", "source": "./" }]
+}
