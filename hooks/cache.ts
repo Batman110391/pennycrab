@@ -49,7 +49,8 @@ export async function ttlOf($: EngineInterface): Promise<Pick<Cache, 'ttlMs' | '
   if (await $.env.get('FORCE_PROMPT_CACHING_5M')) return { ttlMs: TTL['5m'], ttlSource: 'env' }
   const env = await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL')
   if (isTtl(env)) return { ttlMs: TTL[env], ttlSource: 'env' }
-  const setting = await $.settings.read({ key: 'promptCacheTtl' })
+  // Projected here: a `{ key }` read can answer with the whole object (2.1.302's test kit does), not the key's value.
+  const setting = (await $.settings.read()).promptCacheTtl
   if (isTtl(setting)) return { ttlMs: TTL[setting], ttlSource: 'setting' }
   const isBedrock = Boolean(await $.env.get('CLAUDE_CODE_USE_BEDROCK'))
   if ((await $.env.get('ENABLE_PROMPT_CACHING_1H')) || (isBedrock && (await $.env.get('ENABLE_PROMPT_CACHING_1H_BEDROCK')))) {

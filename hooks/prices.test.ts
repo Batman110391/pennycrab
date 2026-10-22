@@ -165,7 +165,7 @@ test('with no prices kept and the page down, costs read as unknown rather than m
   expect(await rowCost($, clock)).toContain('≈?')
 })
 
-test('with the page down at the start, it is asked again ten minutes later, and prices from then on', async ($: Engine, on) => {
+test('with the page down at the start, it is asked again ten minutes later, and prices from then on', { timeoutMs: 30_000 }, async ($: Engine, on) => {
   let page: Page = 'down'
   const { fetched, clock } = world(on, undefined, () => page)
   await start($, clock)

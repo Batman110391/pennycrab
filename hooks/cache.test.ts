@@ -110,6 +110,8 @@ async function paneText($: Engine, re: RegExp) {
 
 const start = ($: Engine) => $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
 
+// An hour of the plugin's one-second ticks takes the kit 5 to 12 seconds: past the default 5-second timeout.
+const SLOW = 30_000
 const PLAN: SessionRateLimit[] = [{ kind: 'five_hour', percentUsed: 40 }]
 const TTL_CASES: [string, World, string | undefined][] = [
   ['FORCE_PROMPT_CACHING_5M wins over every other source', { env: { FORCE_PROMPT_CACHING_5M: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }, rateLimits: PLAN }, '5m'],
@@ -132,7 +134,7 @@ for (const [name, world, left] of TTL_CASES) {
   })
 }
 
-test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after them reads the cache: a re-write spared', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after them reads the cache: a re-write spared', { timeoutMs: SLOW, options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -146,7 +148,7 @@ test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after t
   expect(summary.some(t => t.includes('saved $0.36'))).toBe(true)
 })
 
-test('on a 1-hour cache a 30-minute window needs no ping', async ($: Engine, on) => {
+test('on a 1-hour cache a 30-minute window needs no ping', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on, { rateLimits: PLAN })
   await start($)
   await turn($, 'm1')
@@ -154,7 +156,7 @@ test('on a 1-hour cache a 30-minute window needs no ping', async ($: Engine, on)
   expect(sent.forks).toBe(0)
 })
 
-test('a ping that rewrites a part of the conversation goes on; one that rewrites most of it stops the pings', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+test('a ping that rewrites a part of the conversation goes on; one that rewrites most of it stops the pings', { timeoutMs: SLOW, options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -163,7 +165,7 @@ test('a ping that rewrites a part of the conversation goes on; one that rewrites
   expect(sent.forks).toBe(6)
 })
 
-test('a ping that finds the entry gone stops the pings until the next turn', async ($: Engine, on) => {
+test('a ping that finds the entry gone stops the pings until the next turn', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -172,7 +174,7 @@ test('a ping that finds the entry gone stops the pings until the next turn', asy
   expect(sent.forks).toBe(1)
 })
 
-test('no ping while a turn is open', async ($: Engine, on) => {
+test('no ping while a turn is open', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -181,7 +183,7 @@ test('no ping while a turn is open', async ($: Engine, on) => {
   expect(sent.forks).toBe(0)
 })
 
-test('with keep-warm off, no ping', { options: { keepWarm: 'off' } }, async ($: Engine, on) => {
+test('with keep-warm off, no ping', { timeoutMs: SLOW, options: { keepWarm: 'off' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -191,7 +193,7 @@ test('with keep-warm off, no ping', { options: { keepWarm: 'off' } }, async ($: 
 
 // auto, with the fake engine's numbers on Opus 5.5: a ping reads 100K tokens for $0.0202; a rewrite of them costs
 // $0.48 more than reading them on a 5-minute cache, $0.78 more on a 1-hour cache.
-test('auto on a 5-minute cache stops once the pings would pass a quarter of the rewrite: 5 pings', async ($: Engine, on) => {
+test('auto on a 5-minute cache stops once the pings would pass a quarter of the rewrite: 5 pings', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -199,7 +201,7 @@ test('auto on a 5-minute cache stops once the pings would pass a quarter of the 
   expect(sent.forks).toBe(5)
 })
 
-test('auto on a subscription: away 1 hour 5 minutes, one ping at 59 minutes, and the return reads the cache', async ($: Engine, on) => {
+test('auto on a subscription: away 1 hour 5 minutes, one ping at 59 minutes, and the return reads the cache', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on, { rateLimits: PLAN })
   await start($)
   await turn($, 'm1')
@@ -211,7 +213,7 @@ test('auto on a subscription: away 1 hour 5 minutes, one ping at 59 minutes, and
   expect(summary.some(t => t.includes('saved $0.76'))).toBe(true)
 })
 
-test('auto on a subscription keeps the cache warm 8 hours at most: 8 pings, one an hour', { timeoutMs: 60_000 }, async ($: Engine, on) => {
+test('auto on a subscription keeps the cache warm 8 hours at most: 8 pings, one an hour', { timeoutMs: 10 * SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on, { rateLimits: PLAN })
   await start($)
   await turn($, 'm1')
@@ -220,7 +222,7 @@ test('auto on a subscription keeps the cache warm 8 hours at most: 8 pings, one 
   expect(sent.forks).toBe(8)
 })
 
-test('auto with no prices to weigh the pings sends none', async ($: Engine, on) => {
+test('auto with no prices to weigh the pings sends none', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on, { noPrices: true })
   await start($)
   await turn($, 'm1')
@@ -310,7 +312,7 @@ test('a slow answer from the engine does not let a second ping go out beside the
 
 // A first ping that rewrote 10K tokens costs $0.068; the next ones read for $0.020. Weighed as reads, three fit in
 // the quarter ($0.12) of the $0.48 rewrite; weighed as the average so far, one would.
-test('auto weighs the next ping as a read: a first ping that rewrote a part of the context leaves room for more', async ($: Engine, on) => {
+test('auto weighs the next ping as a read: a first ping that rewrote a part of the context leaves room for more', { timeoutMs: SLOW }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
@@ -319,7 +321,7 @@ test('auto weighs the next ping as a read: a first ping that rewrote a part of t
   expect(sent.forks).toBe(3)
 })
 
-test('after /model to another family no ping goes out: the new model has no entry to keep', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
+test('after /model to another family no ping goes out: the new model has no entry to keep', { timeoutMs: SLOW, options: { keepWarm: '30m' } }, async ($: Engine, on) => {
   const { sent, clock } = engine(on)
   await start($)
   await turn($, 'm1')
