@@ -1,0 +1,15 @@
+{
+  "name": "pennycrab",
+  "version": "0.1.0",
+  "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "router": {
+      "type": "string",
+      "title": "Subagent router",
+      "description": "prudent: Explore and general-purpose run on Sonnet when your session runs on Opus or Fable. aggressive: Explore runs on Haiku at low effort. off: subagents inherit your model.",
+      "options": ["prudent", "aggressive", "off"],
+      "default": "prudent"
+    }
+  }
+}
