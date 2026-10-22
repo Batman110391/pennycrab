@@ -21,8 +21,6 @@ const NAME: Record<Tier, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Op
 // The status line's one letter: Other's own initial would read as Opus.
 const LETTER: Record<Tier, string> = { haiku: 'H', sonnet: 'S', opus: 'O', fable: 'F', other: '?' }
 const WARN = '#BA7517'
-const GOOD = '#3B6D11'
-const BAD = '#A32D2D'
 const FONT = 'system-ui, -apple-system, Segoe UI, sans-serif'
 const GLYPH: Record<Agent['status'], string> = { running: '●', tool: '●', handover: '⚑', completed: '✓', failed: '✗', stopped: '✗' }
 
@@ -43,12 +41,13 @@ export function fmtTime(ms: number) {
   return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
 }
 const isLive = (a: Agent) => a.endedAt === undefined
-const isGuarded = (a: Agent) => a.status === 'handover'
+// Still winding down under the guard; once it ends it is finished, its trip kept on its row.
+const isGuarded = (a: Agent) => a.status === 'handover' && isLive(a)
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
 const tripLabel = (a: Agent) => (a.trip === 'budget' ? '⚑ over budget' : undefined)
 const meta = (a: Agent) =>
-  [isGuarded(a) && tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOf(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
+  [tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOf(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
 // --- desktop: one SVG per row, because the desktop lays sibling elements out on separate lines.
 
@@ -69,12 +68,14 @@ export function clip(s: string, size: number, maxW: number) {
 }
 
 const STYLE = `<style>
-.fg{fill:#2C2C2A}.dim{fill:#5F5E5A}.faint{fill:#888780}.track{fill:#E8E6DF}.card{fill:#F1EFE8}.rule{stroke:#E8E6DF}.dot{fill:#D3D1C7}
-@media (prefers-color-scheme: dark){.fg{fill:#F1EFE8}.dim{fill:#B4B2A9}.faint{fill:#888780}.track{fill:#3A3A37}.card{fill:#2A2A28}.rule{stroke:#3A3A37}.dot{fill:#444441}}
-.pulse{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.fg{fill:#2C2C2A}.dim{fill:#5F5E5A}.faint{fill:#888780}.track{fill:#E8E6DF}.card{fill:#F6F5F0}.rule{stroke:#E8E6DF}.chip{fill:#2C2C2A;fill-opacity:.06}
+.good{fill:#3B6D11}.bad{fill:#A32D2D}.warn{fill:#A0620C}.goodS{stroke:#3B6D11}.badS{stroke:#A32D2D}.ring{stroke:#5F5E5A}
+@media (prefers-color-scheme: dark){.fg{fill:#F1EFE8}.dim{fill:#B4B2A9}.faint{fill:#8C8B85}.track{fill:#3A3A37}.card{fill:#262624}.rule{stroke:#3A3A37}.chip{fill:#F1EFE8;fill-opacity:.08}
+.good{fill:#97C459}.bad{fill:#F09595}.warn{fill:#EF9F27}.goodS{stroke:#97C459}.badS{stroke:#F09595}.ring{stroke:#D3D1C7}}
+.pulse{animation:pulse 1s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .run .bd{animation:bob .5s steps(1) infinite -.125s}.run .la{animation:st .5s steps(1) infinite}.run .lb{animation:st .5s steps(1) infinite -.25s}
 .fast .bd,.fast .la{animation-duration:.25s}.fast .lb{animation-duration:.25s;animation-delay:-.125s}
-.run .coin{transform-box:fill-box;transform-origin:center;animation:spin 1.6s ease-in-out infinite}
+.run .coin{transform-box:fill-box;transform-origin:center;animation:spin 1s ease-in-out infinite}
 .run .lens{transform-box:fill-box;animation:sway 1s ease-in-out infinite}
 .run .speed,.run .glint,.run .spark,.run .light{animation:blink 1s steps(1) infinite}
 @keyframes st{50%{transform:translateY(-1px)}}@keyframes bob{50%{transform:translateY(1px)}}
@@ -180,7 +181,7 @@ const COSTUMES: Record<Costume, (f: Paint) => void> = {
     f(0, 8, 2, 1, '#F1EFE8')
   },
 }
-const costumeOf = (a: Agent): Costume => (isGuarded(a) ? 'guard' : a.tier)
+const costumeOf = (a: Agent): Costume => (a.trip ? 'guard' : a.tier)
 
 // One Clawd, 16 units wide and 14 tall before `scale`.
 export function crab(x: number, y: number, costume: Costume, isWalking: boolean, scale: number) {
@@ -195,52 +196,138 @@ export function crab(x: number, y: number, costume: Costume, isWalking: boolean,
   return `<g transform="translate(${x} ${y}) scale(${scale})" shape-rendering="crispEdges"><g class="${motion}"><g class="bd">${parts.get('bd')!.join('')}${props}</g>${group('la')}${group('lb')}</g></g>`
 }
 
-// The pane's dotted paper: drawn behind everything, in pieces no taller than the engine accepts for one Svg.
-const PAPER_MAX = 4096
-const paper = (w: number, h: number) =>
-  svg(w, h, `<defs><pattern id="paper" width="16" height="16" patternUnits="userSpaceOnUse"><circle class="dot" cx="8" cy="8" r="0.9"/></pattern></defs><rect width="${w}" height="${h}" fill="url(#paper)"/>`)
-const paperPieces = (h: number) => {
-  const out: number[] = []
-  for (let left = h; left > 0; left -= PAPER_MAX) out.push(Math.min(PAPER_MAX, left))
-  return out
+const B = ' font-weight="700"'
+const SB = ' font-weight="600"'
+// The time a warm entry has left, as the ring's centre reads it.
+const fmtLeft = (ms: number) => {
+  const mins = Math.max(0, Math.ceil(ms / 60_000))
+  return mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
+}
+// The cache as a ring that empties as the entry nears its lapse; nothing when the session caches nothing.
+function ringOf(c: Cache, at: number, cx: number, cy: number) {
+  if (c.ttlMs === null || c.lastRequestAt === null) return ''
+  const r = 30
+  const circ = 2 * Math.PI * r
+  const left = c.lastRequestAt + c.ttlMs - at
+  const base = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="rule" stroke-width="6"/>`
+  const name = (s: string) => label(cx, cy + r + 18, 10.5, 'dim', s, `${SB} text-anchor="middle"`)
+  const centre = (big: string, small: string) =>
+    label(cx, cy + 2, 16, 'fg', big, `${B} text-anchor="middle"`) + label(cx, cy + 15, 9.5, 'dim', small, ' text-anchor="middle"')
+  // A turn renews the entry as it goes: the whole lifetime starts over once it ends.
+  if (c.isTurnOpen)
+    return base + `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="ring" stroke-width="6" stroke-dasharray="4 4"/>` + centre(fmtLeft(c.ttlMs), 'after turn') + name('Cache in use')
+  if (left <= 0) return base + label(cx, cy + 5, 18, 'faint', '—', `${B} text-anchor="middle"`) + name('Cache expired')
+  const arc = (circ * left) / c.ttlMs
+  return (
+    base +
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="ring" stroke-width="6" stroke-linecap="round" stroke-dasharray="${arc.toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>` +
+    centre(fmtLeft(left), 'left') +
+    name('Cache warm')
+  )
 }
 
-const HEAD_H = 46
-function headSvg(w: number, cost: number, saved: number, mainPct: number) {
-  const gap = 8
-  const cw = (w - gap * 2) / 3
-  const card = (i: number, name: string, value: string, fill?: string) => {
-    const x = i * (cw + gap)
-    return `<rect class="card" x="${x}" y="1" width="${cw}" height="42" rx="10"/>${label(x + 10, 17, 11, 'dim', name)}${label(x + 10, 35, 15, fill ? '' : 'fg', value, ` font-weight="600"${fill ? ` fill="${fill}"` : ''}`)}`
-  }
-  return svg(w, HEAD_H, card(0, 'Cost', `≈${fmtUsd(cost)}`) + card(1, 'Saved', fmtPriced(saved), saved > 0 ? GOOD : undefined) + card(2, 'Main context', `${mainPct}%`))
+// The pane's head: one big number for the savings, what was spent beside what it would have been, the cache ring
+// and the main thread's context.
+const HERO_H = 118
+function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, mainPct: number) {
+  const hasRing = c.ttlMs !== null && c.lastRequestAt !== null
+  const room = w - (hasRing ? 124 : 32)
+  const bx = 122
+  const bw = Math.max(20, w - bx - (hasRing ? 124 : 16))
+  return svg(
+    w,
+    HERO_H,
+    `<rect class="card" x="0" y="0" width="${w}" height="${HERO_H}" rx="12"/>` +
+      label(16, 26, 10, 'dim', 'SAVED THIS SESSION', SB) +
+      label(16, 62, 34, saved > 0 ? 'good' : saved < 0 ? 'bad' : 'fg', fmtPriced(saved), B) +
+      label(16, 82, 11, 'dim', clip(`spent ≈${fmtUsd(cost)} · would have been ${priceBook() ? fmtUsd(cost + saved) : '?'}`, 11, room)) +
+      label(16, 104, 10.5, 'dim', `Main context ${mainPct}%`) +
+      `<rect class="track" x="${bx}" y="99" width="${bw}" height="5" rx="2.5"/><rect class="fg" fill-opacity=".55" x="${bx}" y="99" width="${Math.round((bw * mainPct) / 100)}" height="5" rx="2.5"/>` +
+      (hasRing ? ringOf(c, at, w - 54, 50) : ''),
+  )
 }
 
-// Top right of a row: a pulsing dot while it works, a tick once done, a cross when it failed or stopped.
-function mark(x: number, y: number, a: Agent, color: string) {
-  if (a.status === 'running' || a.status === 'tool') return `<circle class="pulse" cx="${x}" cy="${y}" r="4" fill="${color}"/>`
-  if (a.status === 'handover') return `<circle cx="${x}" cy="${y}" r="4" fill="${WARN}"/>`
-  if (a.status === 'completed') return `<polyline points="${x - 5},${y} ${x - 1.5},${y + 3.5} ${x + 5},${y - 3.5}" fill="none" stroke="${GOOD}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
-  return `<g stroke="${BAD}" stroke-width="2" stroke-linecap="round"><line x1="${x - 4}" y1="${y - 4}" x2="${x + 4}" y2="${y + 4}"/><line x1="${x + 4}" y1="${y - 4}" x2="${x - 4}" y2="${y + 4}"/></g>`
+// One faint line under the head: what the keep-warm cost, or what a subscription's dollars mean.
+const NOTE_H = 20
+const noteSvg = (w: number, s: string) => svg(w, NOTE_H, label(2, 13, 10.5, 'faint', clip(s, 10.5, w - 4)))
+const pingNote = (c: Cache) =>
+  c.pings ? `Kept warm while away: ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtPriced(c.pingUsd)}${c.savedUsd > 0 ? ` · saved ${fmtUsd(c.savedUsd)} of rewrites` : ''}` : undefined
+// shortcut: a TTL set by a variable or setting hides the account, so no note then; add a field if that matters.
+const isPlan = (c: Cache) => c.ttlSource === 'plan' || c.ttlSource === 'plan-over'
+const PLAN_NOTE = 'ⓘ Subscription: dollars are list-price equivalents, counted against your usage limits.'
+
+// What pennycrab does, while no subagent has started yet.
+const EMPTY_H = 150
+function emptySvg(w: number) {
+  const x = w < 360 ? 16 : 100
+  const items = ['Sends Explore and helper subagents to a cheaper model', 'Hands back a subagent that passes its budget', 'Keeps the prompt cache warm while you are away']
+  return svg(
+    w,
+    EMPTY_H,
+    `<rect class="card" x="0" y="0" width="${w}" height="${EMPTY_H}" rx="12"/>` +
+      (w < 360 ? '' : crab(20, 34, 'other', true, 4)) +
+      label(x, 34, 13, 'fg', clip('Pennycrab is watching this session', 13, w - x - 12), B) +
+      items.map((s, i) => `<circle class="good" cx="${x + 6}" cy="${58 + i * 24}" r="3"/>` + label(x + 16, 62 + i * 24, 11, 'dim', clip(s, 11, w - x - 28))).join('') +
+      label(x, 136, 10.5, 'faint', clip('Subagents show up here as they start.', 10.5, w - x - 12)),
+  )
 }
 
-const ROW_H = 66
+// A section's name and count over a hairline, with room above it so sections do not run together.
+const SECTION_H = 34
+const sectionSvg = (w: number, name: string, n: number) => {
+  const s = `${name} · ${n}`
+  const lx = Math.round(widthOf(s, 10.5) + 14)
+  return svg(w, SECTION_H, label(2, 26, 10.5, 'dim', s, B) + `<line class="rule" x1="${lx}" y1="22" x2="${w}" y2="22" stroke-width="1"/>`)
+}
+
+// A light pill; tinted with `color` when it names a model or the guard.
+const CHIP_H = 17
+function chip(x: number, y: number, s: string, color?: string) {
+  const cw = Math.round(widthOf(s, 10.5) + 12)
+  const bg = color
+    ? `<rect x="${x}" y="${y}" width="${cw}" height="${CHIP_H}" rx="8.5" fill="${color}" fill-opacity=".14"/>`
+    : `<rect class="chip" x="${x}" y="${y}" width="${cw}" height="${CHIP_H}" rx="8.5"/>`
+  const text = label(x + cw / 2, y + 12.5, 10.5, color ? '' : 'dim', s, `${SB} text-anchor="middle"${color ? ` fill="${color}"` : ''}`)
+  return { markup: bg + text, width: cw }
+}
+const ENDED: Partial<Record<Agent['status'], string>> = { completed: '✓ done', failed: '✗ failed', stopped: '✗ stopped' }
+const chipsOf = (a: Agent): [string, string?][] =>
+  [
+    [NAME[a.tier], COLOR[a.tier]] as [string, string],
+    a.trip ? ([tripLabel(a)!, WARN] as [string, string]) : undefined,
+    a.effort ? [a.effort] : undefined,
+    a.routedFrom ? [`↓ from ${NAME[tierOf(a.routedFrom)]}`] : undefined,
+    a.currentTool ? [`▶ ${a.currentTool}`] : undefined,
+    !isLive(a) && !a.trip && ENDED[a.status] ? [ENDED[a.status]!] : undefined,
+  ].filter((c): c is [string, string?] => c !== undefined)
+
+// One subagent as a card: its crab, title and chips, its cost and figures on the right, its context bar.
+const ROW_H = 70
 function rowSvg(w: number, a: Agent, at: number) {
-  const color = COLOR[a.tier]
-  const x = 44
-  const tw = w - x - 20
+  const x = 52
+  const tw = w - x - 14
   const ctx = ctxOf(a)
-  const info = meta(a)
+  const cost = `≈${fmtCost(a)}`
+  const figures = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} · ${fmtTime(elapsed(a, at))}`
+  const chipsEnd = w - 14 - widthOf(figures, 10.5) - 10
+  let cx = x
+  let chips = ''
+  for (const [s, color] of chipsOf(a)) {
+    const c = chip(cx, 32, s, color)
+    if (cx + c.width > chipsEnd && cx > x) break
+    chips += c.markup
+    cx += c.width + 5
+  }
   return svg(
     w,
     ROW_H,
-    crab(2, 15, costumeOf(a), isLive(a), 2.4) +
-      label(x, 18, 13, 'fg', clip(a.description || a.type, 13, tw), ' font-weight="600"') +
-      `<text x="${x}" y="34" font-family="${FONT}" font-size="11"><tspan fill="${color}">${NAME[a.tier]}</tspan><tspan class="dim">${esc(info ? ` · ${clip(info, 11, tw - 50)}` : '')}</tspan></text>` +
-      label(x + tw, 49, 11, 'dim', `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`, ' text-anchor="end"') +
-      `<rect class="track" x="${x}" y="55" width="${tw}" height="4" rx="2"/><rect x="${x}" y="55" width="${Math.round((tw * ctx) / 100)}" height="4" rx="2" fill="${isGuarded(a) ? WARN : color}"/>` +
-      mark(w - 8, 15, a, color) +
-      `<line class="rule" x1="0" y1="65.5" x2="${w}" y2="65.5"/>`,
+    `<rect class="card" x="0" y="2" width="${w}" height="${ROW_H - 4}" rx="10"/>` +
+      crab(10, 18, costumeOf(a), isLive(a), 2.4) +
+      label(x, 24, 13, 'fg', clip(a.description || a.type, 13, tw - widthOf(cost, 13) - 12), SB) +
+      label(w - 14, 24, 13, a.isUnpriced ? 'faint' : 'fg', cost, `${B} text-anchor="end"`) +
+      chips +
+      label(w - 14, 45, 10.5, 'dim', figures, ' text-anchor="end"') +
+      `<rect class="track" x="${x}" y="57" width="${tw}" height="4" rx="2"/><rect x="${x}" y="57" width="${Math.round((tw * ctx) / 100)}" height="4" rx="2" fill="${a.trip ? WARN : COLOR[a.tier]}"/>`,
   )
 }
 
@@ -258,28 +345,28 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
   )
 }
 
-// The band: crabs at work, how many, the main thread's context and the savings.
-const BAND_H = 24
+// The band: crabs at work, how many and how many the guard stopped, what was spent and saved.
+const BAND_H = 40
 const runningText = (live: Agent[]) => {
   const guarded = live.filter(isGuarded).length
   return `${live.length - guarded} running${guarded ? ` · ${guarded} handover` : ''}`
 }
-function bandSvg(w: number, live: Agent[], mainPct: number, saved: number) {
-  const text = runningText(live)
+function bandSvg(w: number, live: Agent[], cost: number, saved: number) {
+  const guarded = live.filter(isGuarded).length
   const crabs = Math.min(live.length, 5)
-  const tx = crabs * 27 + 6
+  const tx = 10 + crabs * 32 + 6
+  const working = `${live.length - guarded} working`
   const right = saved > 0 ? `saved ${fmtUsd(saved)}` : ''
-  const bx = Math.round(tx + widthOf(text, 13) + 18)
-  const bw = Math.max(40, Math.round(w - bx - 44 - widthOf(right, 12) - 14))
-  const mid = BAND_H / 2
+  const rw = widthOf(right, 12.5)
   return svg(
     w,
     BAND_H,
-    live.slice(0, crabs).map((a, i) => crab(i * 27, 1.5, costumeOf(a), true, 1.5)).join('') +
-      label(tx, mid + 4.5, 13, 'fg', text, ' font-weight="500"') +
-      `<rect class="track" x="${bx}" y="${mid - 3}" width="${bw}" height="6" rx="3"/><rect class="faint" x="${bx}" y="${mid - 3}" width="${Math.round((bw * mainPct) / 100)}" height="6" rx="3"/>` +
-      label(bx + bw + 7, mid + 4.5, 12, 'dim', `${mainPct}%`) +
-      (right ? label(w, mid + 4.5, 12, '', right, ` text-anchor="end" font-weight="500" fill="${GOOD}"`) : ''),
+    `<rect class="card" x="0" y="2" width="${w}" height="${BAND_H - 4}" rx="10"/>` +
+      live.slice(0, crabs).map((a, i) => crab(10 + i * 32, 6, costumeOf(a), true, 2)).join('') +
+      label(tx, 25, 12.5, 'fg', working, SB) +
+      (guarded ? label(tx + widthOf(working, 12.5) + 6, 25, 12, 'dim', `· ${guarded} stopped by the guard`) : '') +
+      (right ? label(w - 14, 25, 12.5, 'good', right, `${B} text-anchor="end"`) : '') +
+      (w > 520 ? label(w - 14 - (rw ? rw + 16 : 0), 25, 11.5, 'dim', `spent ≈${fmtUsd(cost)}`, ' text-anchor="end"') : ''),
   )
 }
 
@@ -318,7 +405,7 @@ async function view($: EngineInterface) {
   const u = await read($, ui)
   const c = await read($, cache)
   const at = Math.max(await read($, now), ...list.map(a => a.startedAt), c.lastRequestAt ?? 0, 0)
-  return { list, m, s, u, at, mainPct: pctOf(m), cacheText: cacheLine(c, at) }
+  return { list, m, s, u, c, at, mainPct: pctOf(m), cacheText: cacheLine(c, at) }
 }
 const pctOf = (m: Main) => (m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0)
 
@@ -326,17 +413,16 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   noteViewport(e)
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const { list, m, s, u, at, mainPct, cacheText } = await view($)
+  const { list, m, s, u, c, at, mainPct, cacheText } = await view($)
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
-  const done = list.filter(a => !isLive(a) && !isGuarded(a)).reverse()
+  const done = list.filter(a => !isLive(a)).reverse()
   const summary = `≈${fmtUsd(m.costUsd)} · saved ${fmtPriced(s.usd)} · main ${mainPct}%`
   const collapse = (
     <Button key="collapse" plain label={u.isCompact ? 'Expand' : 'Collapse'} onPress={() => update($, ui, v => ({ ...v, isCompact: !v.isCompact }))} />
   )
-  const finished = (
-    <Button key="finished" plain label={`${u.isDoneOpen ? '▾' : '▸'} Finished · ${done.length}`} onPress={() => update($, ui, v => ({ ...v, isDoneOpen: !v.isDoneOpen }))} />
-  )
+  const toggleDone = () => update($, ui, v => ({ ...v, isDoneOpen: !v.isDoneOpen }))
+  const finished = <Button key="finished" plain label={`${u.isDoneOpen ? '▾' : '▸'} Finished · ${done.length}`} onPress={toggleDone} />
 
   if (e.surface === 'desktop' && 'Svg' in r) {
     const { Svg } = r
@@ -352,27 +438,22 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     const row = (a: Agent) => (
       <Svg key={a.id} source={rowSvg(w, a, at)} alt={`${a.description}: ${NAME[a.tier]}, ${a.status}, context ${ctxOf(a)}%`} width={w} height={ROW_H} />
     )
-    // A Text or Button line is about 20px on the desktop: the paper counts 24 so it never ends short.
-    const lines = 1 + Number(cacheText !== undefined) + Number(list.length === 0) + Number(running.length > 0) + Number(guarded.length > 0) + Number(done.length > 0)
-    const rows = running.length + guarded.length + (u.isDoneOpen ? done.length : 0)
+    const section = (name: string, n: number) => <Svg key={`section-${name}`} source={sectionSvg(w, name, n)} alt={`${name} ${n}`} width={w} height={SECTION_H} />
+    const ping = pingNote(c)
     return (
       <Box flexDirection="column">
-        {paperPieces(HEAD_H + lines * 24 + rows * ROW_H).map((ph, i) => (
-          <Svg key={`paper-${i}`} source={paper(w, ph)} alt="" width={w} height={ph} />
-        ))}
-        {/* Laid on top of the paper above it. */}
-        <Box flexDirection="column" position="absolute" top={0} left={0} right={0}>
-          <Svg source={headSvg(w, m.costUsd, s.usd, mainPct)} alt={summary} width={w} height={HEAD_H} />
-          {collapse}
-          {cacheText !== undefined && <Text dimColor>{cacheText}</Text>}
-          {list.length === 0 && <Text dimColor>No subagents yet. They show up here as they start.</Text>}
-          {running.length > 0 && <Text dimColor>{`Running · ${running.length}`}</Text>}
-          {running.map(row)}
-          {guarded.length > 0 && <Text dimColor>{`Guard · ${guarded.length}`}</Text>}
-          {guarded.map(row)}
-          {done.length > 0 && finished}
-          {u.isDoneOpen && done.map(row)}
-        </Box>
+        <Svg source={heroSvg(w, m.costUsd, s.usd, c, at, mainPct)} alt={`${summary}${cacheText ? ` · ${cacheText}` : ''}`} width={w} height={HERO_H} />
+        {ping !== undefined && <Svg key="ping" source={noteSvg(w, ping)} alt={ping} width={w} height={NOTE_H} />}
+        {isPlan(c) && <Svg key="plan" source={noteSvg(w, PLAN_NOTE)} alt={PLAN_NOTE} width={w} height={NOTE_H} />}
+        {collapse}
+        {list.length === 0 && <Svg key="empty" source={emptySvg(w)} alt="No subagents yet. They show up here as they start." width={w} height={EMPTY_H} />}
+        {running.length > 0 && section('WORKING', running.length)}
+        {running.map(row)}
+        {guarded.length > 0 && section('STOPPING · GUARD', guarded.length)}
+        {guarded.map(row)}
+        {done.length > 0 && section('FINISHED', done.length)}
+        {done.length > 0 && <Button key="finished" plain label={u.isDoneOpen ? '▾ Hide' : '▸ Show'} onPress={toggleDone} />}
+        {u.isDoneOpen && done.map(row)}
       </Box>
     )
   }
@@ -444,15 +525,13 @@ export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt
   // The terminal also lists an Svg, which draws nothing there, so the surface is checked as well.
   if (e.surface !== 'terminal' && 'Svg' in r) {
     const { Svg } = r
-    // A column is about 8px; the two buttons beside the drawing take the rest.
-    const w = Math.max(180, Math.min(1600, (e.props.bodyColumns || 100) * 8 - 96))
+    // A column is about 8px. The desktop puts a button on a line of its own, so there is one, under the drawing:
+    // the band goes by itself once the subagents end.
+    const w = Math.max(180, Math.min(1600, (e.props.bodyColumns || 100) * 8 - 16))
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" alignItems="center" gap={1}>
-          <Svg source={bandSvg(w, live, mainPct, s.usd)} alt={`${live.length} subagents running, main context ${mainPct}%, saved ${fmtUsd(s.usd)}`} width={w} height={BAND_H} />
-          {crew}
-          {hide}
-        </Box>
+        <Svg source={bandSvg(w, live, m.costUsd, s.usd)} alt={`${runningText(live)}, saved ${fmtUsd(s.usd)}`} width={w} height={BAND_H} />
+        <Button key="pennycrab-open" plain label="Pennycrab ›" onPress={() => void togglePane($)} />
         {below}
       </Box>
     )

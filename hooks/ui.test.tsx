@@ -27,14 +27,19 @@ test('each role wears its own costume, and only a working crab moves', () => {
 
 // The test's hooks stand for the engine: a session on Opus, and one plain Explore spawn the router sends to Haiku.
 async function session($: Engine, on: On) {
+  const opens = { n: 0 }
   mock.env(on, {})
   mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
   on('command.register', async () => ({ value: undefined }) as never)
-  on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
+  on('ui.open', async () => {
+    opens.n++
+    return { value: { isPlaced: true } } as never
+  })
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Find the <auth> flow', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  return opens
 }
 
 const PANE = { component: 'Pane', requestId: 'pennycrab', props: { title: 'Pennycrab', isFocused: false, bodyColumns: 40, placement: 'dock' } as never } as const
@@ -52,7 +57,7 @@ test('terminal: the pane lists the routed subagent as text', async ($: Engine, o
   expect(found).toEqual({ svg: 0, row: 1, routed: 1 })
 })
 
-test('desktop: the pane draws its grid, header and one row as Svg, the band one more', async ($: Engine, on) => {
+test('desktop: the pane draws its head, a section and one row as Svg, the band one more', async ($: Engine, on) => {
   await session($, on)
   const pane = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...PANE })
   const svgs = await pane.findAll({ type: 'Svg' })
@@ -62,7 +67,8 @@ test('desktop: the pane draws its grid, header and one row as Svg, the band one 
   // The description reaches the markup escaped, and the row's figures stay apart once SVG folds its spaces.
   expect(markup).toContain('Find the &#60;auth&#62; flow')
   expect(markup).not.toContain('<auth>')
-  expect(markup).toContain('ctx 0% · 0 · ≈$0.00 · 0s')
+  expect(markup).toContain('ctx 0% · 0 · 0s')
+  expect(markup).toContain('≈$0.00')
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
   const bandSvg = (await band.findAll({ type: 'Svg' })).length
   await band.unmount()
@@ -276,4 +282,56 @@ test('a routed Explore\'s requests go out at low effort, read from its row', asy
   const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-5-5', messageCount: 1, agentId: 'a1', effort: 'high' })
   for (;;) if ((await stream.next()).done) break
   expect(sent.efforts).toEqual(['low'])
+})
+
+const labels = async (ui: { findAll: (q: object) => Promise<unknown[]> }) =>
+  (await ui.findAll({ type: 'Button' })).map(b => String((b as { props?: { label?: unknown } }).props?.label))
+const svgCount = async (ui: { findAll: (q: object) => Promise<unknown[]> }) => (await ui.findAll({ type: 'Svg' })).length
+
+test('desktop pane buttons: Collapse folds it to one shelf and Expand brings it back; Show opens the finished rows', async ($: Engine, on) => {
+  on('turn.complete', async () => ({ text: '' }))
+  await session($, on)
+  await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', agentId: 'a1' })
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...PANE })
+  const start = { svg: await svgCount(ui), buttons: await labels(ui) }
+  await ui.press({ key: 'finished' })
+  const shown = { svg: await svgCount(ui), buttons: await labels(ui) }
+  await ui.press({ key: 'collapse' })
+  const folded = { svg: await svgCount(ui), buttons: await labels(ui) }
+  await ui.press({ key: 'collapse' })
+  const back = await labels(ui)
+  await ui.unmount()
+  // Head and the FINISHED section; then the finished row too; folded, the shelf alone.
+  expect(start).toEqual({ svg: 2, buttons: ['Collapse', '▸ Show'] })
+  expect(shown).toEqual({ svg: 3, buttons: ['Collapse', '▾ Hide'] })
+  expect(folded).toEqual({ svg: 1, buttons: ['Expand'] })
+  expect(back).toEqual(['Collapse', '▾ Hide'])
+})
+
+test('desktop band: its one button opens the pane', async ($: Engine, on) => {
+  on('ui.panes', async () => ({ value: [] }) as never)
+  const opens = await session($, on)
+  const before = opens.n
+  const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
+  const buttons = await labels(band)
+  await band.press({ key: 'pennycrab-open' })
+  await band.unmount()
+  expect({ buttons, opened: opens.n - before }).toEqual({ buttons: ['Pennycrab ›'], opened: 1 })
+})
+
+test('terminal band buttons: ×N opens the pane, ✕ hides the band until the next subagent', async ($: Engine, on) => {
+  // Stands for the engine's own band, drawn once ours steps aside.
+  on('ui.render', async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  on('ui.panes', async () => ({ value: [] }) as never)
+  const opens = await session($, on)
+  const before = opens.n
+  const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', ...BAND })
+  await band.press({ key: 'pennycrab-crew' })
+  await band.press({ key: 'pennycrab-hide' })
+  const hidden = await labels(band)
+  await band.unmount()
+  expect({ opened: opens.n - before, hidden }).toEqual({ opened: 1, hidden: [] })
 })
