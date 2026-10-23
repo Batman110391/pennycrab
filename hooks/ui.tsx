@@ -231,6 +231,10 @@ const fmtLeft = (ms: number) => {
   const mins = Math.max(0, Math.ceil(ms / 60_000))
   return mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
 }
+// Within keep-warm's window, pings hold the entry: no time is worth showing. Once keep-warm stops (its window is
+// over, or a ping was not worth it), the time counts.
+const isKeptWarm = (c: Cache, at: number, warm: WarmPolicy | undefined) =>
+  warm !== undefined && !c.isHalted && c.lastTurnAt !== null && at < c.lastTurnAt + warm.windowMs && c.lastRequestAt !== null && c.ttlMs !== null && at < c.lastRequestAt + c.ttlMs
 // The cache as a ring that empties as the entry nears its lapse; nothing when the session caches nothing.
 function ringOf(c: Cache, at: number, cx: number, cy: number, warm: WarmPolicy | undefined) {
   if (c.ttlMs === null || c.lastRequestAt === null) return ''
@@ -241,10 +245,8 @@ function ringOf(c: Cache, at: number, cx: number, cy: number, warm: WarmPolicy |
   const name = (s: string) => label(cx, cy + r + 18, 10.5, 'dim', s, `${SB} text-anchor="middle"`)
   const centre = (big: string, small: string) =>
     label(cx, cy + 2, 16, 'fg', big, `${B} text-anchor="middle"`) + label(cx, cy + 15, 9.5, 'dim', small, ' text-anchor="middle"')
-  // A turn renews the entry as it goes, and keep-warm pings it within its window: no time to show, only whether
-  // keep-warm takes over. Once keep-warm stops (its window is over, or a ping was not worth it), the time counts.
-  const isKept = warm !== undefined && !c.isHalted && c.lastTurnAt !== null && at < c.lastTurnAt + warm.windowMs
-  if (c.isTurnOpen || (isKept && left > 0))
+  // A turn renews the entry as it goes: no time to show either, only whether keep-warm takes over.
+  if (c.isTurnOpen || isKeptWarm(c, at, warm))
     return (
       base +
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="ring" stroke-width="6"/>` +
@@ -418,12 +420,19 @@ const textBar = (pct: number, width: number) => {
 
 // One line on the main thread's prompt cache: how long it stays warm, and what keeping it so cost.
 const CACHE_TICK_MS = 15_000
-export function cacheLine(c: Cache, at: number) {
+export function cacheLine(c: Cache, at: number, warm: WarmPolicy | undefined) {
   if (c.ttlMs === null || c.lastRequestAt === null) return undefined
   const left = c.lastRequestAt + c.ttlMs - at
   const mins = Math.ceil(left / 60_000)
   const leftText = mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
-  const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${leftText} left` : 'Cache expired'
+  const kept = `keep-warm ${warm ? 'on' : 'off'}`
+  const state = c.isTurnOpen
+    ? `Cache in use · ${kept}`
+    : isKeptWarm(c, at, warm)
+      ? `Cache warm · ${kept}`
+      : left > 0
+        ? `Cache warm · ${leftText} left`
+        : 'Cache expired'
   const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ${approx(fmtPriced(c.pingUsd))}` : ''
   return state + pings
 }
@@ -437,14 +446,14 @@ const isCacheCounting = (c: Cache, shown: number, at: number) => {
 
 // --- what the hooks call
 
-async function view($: EngineInterface) {
+async function view($: EngineInterface, warm: WarmPolicy | undefined) {
   const list = await read($, agents)
   const m = await read($, main)
   const s = await read($, savings)
   const u = await read($, ui)
   const c = await read($, cache)
   const at = Math.max(await read($, now), ...list.map(a => a.startedAt), c.lastRequestAt ?? 0, 0)
-  return { list, m, s, u, c, at, mainPct: pctOf(m), cacheText: cacheLine(c, at) }
+  return { list, m, s, u, c, at, mainPct: pctOf(m), cacheText: cacheLine(c, at, warm) }
 }
 const pctOf = (m: Main) => (m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0)
 
@@ -452,7 +461,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>, dis
   noteViewport(e)
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const { list, m, s, u, c, at, mainPct, cacheText } = await view($)
+  const { list, m, s, u, c, at, mainPct, cacheText } = await view($, display.warm)
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
   const done = list.filter(a => !isLive(a)).reverse()

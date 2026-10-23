@@ -40,12 +40,16 @@ test('an entry past its end has lapsed: no ping is sent into it', () => {
 test('the cache line says how long the cache stays warm and what the pings cost, ? with no prices', () => {
   const c: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, lastRequestAt: T0, lastTurnAt: T0, pings: 2, pingUsd: 0.04 }
   usePrices(undefined)
-  expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ?')
+  const warm = keepWarmOf('30m')
+  expect(cacheLine(c, T0 + 61_000, undefined)).toBe('Cache warm · 4m left · 2 pings ?')
   usePrices({ fetchedAt: T0, models: parsePricing(PRICING_PAGE)! })
-  expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ≈$0.04')
-  expect(cacheLine({ ...c, pings: 0 }, T0 + 6 * MIN)).toBe('Cache expired')
-  expect(cacheLine({ ...c, isTurnOpen: true, pings: 0 }, T0)).toBe('Cache in use')
-  expect(cacheLine(NO_CACHE, T0)).toBeUndefined()
+  expect(cacheLine(c, T0 + 61_000, undefined)).toBe('Cache warm · 4m left · 2 pings ≈$0.04')
+  expect(cacheLine(c, T0 + 61_000, warm)).toBe('Cache warm · keep-warm on · 2 pings ≈$0.04')
+  expect(cacheLine({ ...c, isHalted: true }, T0 + 61_000, warm)).toBe('Cache warm · 4m left · 2 pings ≈$0.04')
+  expect(cacheLine({ ...c, pings: 0 }, T0 + 6 * MIN, warm)).toBe('Cache expired')
+  expect(cacheLine({ ...c, isTurnOpen: true, pings: 0 }, T0, warm)).toBe('Cache in use · keep-warm on')
+  expect(cacheLine({ ...c, isTurnOpen: true, pings: 0 }, T0, undefined)).toBe('Cache in use · keep-warm off')
+  expect(cacheLine(NO_CACHE, T0, warm)).toBeUndefined()
 })
 
 // The test's hooks stand for the engine: its settings and the status line's figures, a main turn whose one request
@@ -125,7 +129,8 @@ const TTL_CASES: [string, World, string | undefined][] = [
   ['DISABLE_PROMPT_CACHING: no cache, no line', { env: { DISABLE_PROMPT_CACHING: '1' } }, undefined],
 ]
 for (const [name, world, left] of TTL_CASES) {
-  test(`TTL: ${name}`, async ($: Engine, on) => {
+  // Keep-warm off: the line then reads the entry's own time, which is what these cases are about.
+  test(`TTL: ${name}`, { options: { keepWarm: 'off' } }, async ($: Engine, on) => {
     engine(on, world)
     await start($)
     await turn($, 'm1')
@@ -144,7 +149,7 @@ test('on a 5-minute cache a 30-minute window takes 6 pings, and the turn after t
   await turn($, 'm2')
   const summary = await paneText($, /saved/)
   // 100K tokens read rather than written on Opus: $0.48 spared, less 6 pings of about $0.0202 each.
-  expect(away).toEqual(['Cache warm · 1m left · 6 pings ≈$0.12'])
+  expect(away).toEqual(['Cache warm · keep-warm on · 6 pings ≈$0.12'])
   expect(summary.some(t => t.includes('saved $0.36'))).toBe(true)
 })
 
@@ -288,7 +293,7 @@ test('a ping the API refuses renews nothing: it is tried again 15s later', { opt
   sent.failForks = 1
   await clock.advance(5 * MIN)
   expect(sent.forkAt).toEqual([255_000, 270_000])
-  expect(await paneText($, /^Cache /)).toEqual(['Cache warm · 5m left · 1 ping ≈$0.02'])
+  expect(await paneText($, /^Cache /)).toEqual(['Cache warm · keep-warm on · 1 ping ≈$0.02'])
 })
 
 test('a ping refused each time stops once the entry has lapsed, and none counts', { options: { keepWarm: '30m' } }, async ($: Engine, on) => {
