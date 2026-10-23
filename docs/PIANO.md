@@ -8,7 +8,7 @@ Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della 
 
 | Parte | Cosa fa | Stato |
 | --- | --- | --- |
-| Router (`hooks/router.ts`) | `auto`: Explore su Haiku con effort basso da qualsiasi modello superiore; general-purpose su Sonnet da Opus o Fable. `prudent`: entrambi su Sonnet. `off` | finito, misurato |
+| Router (`hooks/router.ts`) | `auto`: Explore su Haiku con effort basso da qualsiasi modello superiore; general-purpose su Sonnet da Opus o Fable. `explore`: solo Explore su Haiku, general-purpose resta sul modello della sessione. `prudent`: entrambi su Sonnet. `off` | finito, misurato |
 | Guardiano (`hooks/guard.ts`) | oltre il budget (2 $ di default) rifiuta gli strumenti del sub-agente con l'istruzione di consegnare; se insiste, dopo 2 richieste risponde la mod e il turno si chiude | finito, misurato |
 | Cache calda (`hooks/cache.ts`) | `auto`: un ping 45 s prima che la cache scada, finché i ping di un'assenza costano al massimo un quarto della riscrittura che evitano, fino a 8 ore. Si adatta da sola: un ping all'ora con l'abbonamento (cache da 1 ora), pochi ping a consumo (cache da 5 minuti). Un ping rifiutato dall'API si riprova dopo 15 s. `promptCacheTtl` si legge dall'oggetto intero delle impostazioni, perché una lettura `{ key }` può rispondere con l'oggetto | finito, misurato con entrambe le cache |
 | Prezzi (`hooks/prices.ts`) | letti una volta al giorno dalla pagina ufficiale di Anthropic (ogni 10 minuti finché non la raggiunge), salvati tra le sessioni; nessun prezzo nel codice | finito, verificato dal vivo |

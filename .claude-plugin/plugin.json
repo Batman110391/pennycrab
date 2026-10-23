@@ -11,8 +11,8 @@
     "router": {
       "type": "string",
       "title": "Subagent router",
-      "description": "auto: Explore, which only reads and searches, runs on Haiku at low effort, and general-purpose on Sonnet when your session runs on Opus or Fable. prudent: both on Sonnet, from Opus or Fable only. off: subagents inherit your model. Never a model above yours.",
-      "options": ["auto", "prudent", "off"],
+      "description": "auto: Explore, which only reads and searches, runs on Haiku at low effort, and general-purpose on Sonnet when your session runs on Opus or Fable. explore: Explore on Haiku as in auto, general-purpose keeps your model. prudent: both on Sonnet, from Opus or Fable only. off: subagents inherit your model. Never a model above yours.",
+      "options": ["auto", "explore", "prudent", "off"],
       "default": "auto"
     },
     "budget": {

@@ -23,6 +23,13 @@ test('auto: Explore runs on Haiku at low effort from any model above it, general
   expect(routeFor('auto', 'general-purpose', 'claude-fable-5-1')).toEqual({ model: 'sonnet' })
 })
 
+test('explore: Explore on Haiku at low effort as in auto; general-purpose keeps the session\'s model', () => {
+  expect(routeFor('explore', 'Explore', 'claude-opus-5-5')).toEqual({ model: 'haiku', effort: 'low' })
+  expect(routeFor('explore', 'Explore', 'claude-haiku-5-5')).toBeUndefined()
+  expect(routeFor('explore', 'general-purpose', 'claude-opus-5-5')).toBeUndefined()
+  expect(routeFor('explore', 'general-purpose', 'claude-fable-5-1')).toBeUndefined()
+})
+
 test('Mythos ranks with Fable: its built-in subagents are routed down too', () => {
   expect(routeFor('auto', 'Explore', 'claude-mythos-5-1')).toEqual({ model: 'haiku', effort: 'low' })
   expect(routeFor('auto', 'general-purpose', 'claude-mythos-5-1')).toEqual({ model: 'sonnet' })

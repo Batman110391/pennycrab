@@ -6,7 +6,7 @@ import { tierOf } from './prices'
 // The state lib's scan reads an atom only where its reference is written, so each file declares the ones it uses.
 const agents = atom({ plugin: 'pennycrab', key: 'agents' } as const, [])
 
-export type RouterMode = 'auto' | 'prudent' | 'off'
+export type RouterMode = 'auto' | 'explore' | 'prudent' | 'off'
 type Pick = { model: 'haiku' | 'sonnet'; effort?: 'low' }
 // A routed subagent: what it would have run on without pennycrab, and the effort it sets.
 export type Route = { from: string; effort?: 'low' }
@@ -17,11 +17,12 @@ const rankOf = (model: string) => (/mythos/i.test(model) ? RANK.fable : RANK[tie
 
 // The model a built-in subagent gets instead of inheriting its parent's, or undefined to leave it.
 // auto: Explore, which only reads and searches, on Haiku at low effort (measured: the same 32 files described, at
-// 5% of Sonnet's cost and 70% of its time); general-purpose, which also edits, on Sonnet. prudent: both on Sonnet.
+// 5% of Sonnet's cost and 70% of its time); general-purpose, which also edits, on Sonnet. explore: Explore alone, as
+// in auto, so the subagents that write code keep the session's model. prudent: both on Sonnet.
 // Never a model above the parent's; a type the user defined keeps its own model.
 export function routeFor(mode: RouterMode, type: string, parentModel: string): Pick | undefined {
-  if (mode === 'off' || (type !== 'Explore' && type !== 'general-purpose')) return undefined
-  const pick: Pick = mode === 'auto' && type === 'Explore' ? { model: 'haiku', effort: 'low' } : { model: 'sonnet' }
+  if (mode === 'off' || (type !== 'Explore' && (type !== 'general-purpose' || mode === 'explore'))) return undefined
+  const pick: Pick = mode !== 'prudent' && type === 'Explore' ? { model: 'haiku', effort: 'low' } : { model: 'sonnet' }
   const parent = rankOf(parentModel)
   return parent !== undefined && RANK[pick.model]! < parent ? pick : undefined
 }

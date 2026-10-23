@@ -33,7 +33,7 @@ export function setupLine(c: Pick<Cache, 'ttlMs' | 'ttlSource'>, { router, budge
             ? '1-hour cache, one ping an hour while you are away (up to 8 h)'
             : '5-minute cache, pings while you are away as long as they pay for themselves'
           : `${isHour ? '1-hour' : '5-minute'} cache, kept warm ${hours(warm.windowMs)} after your last turn`
-  const route = router === 'auto' ? 'Explore on Haiku, general-purpose on Sonnet' : router === 'prudent' ? 'Explore and general-purpose on Sonnet' : 'router off'
+  const route = router === 'auto' ? 'Explore on Haiku, general-purpose on Sonnet' : router === 'explore' ? 'Explore on Haiku, general-purpose on your model' : router === 'prudent' ? 'Explore and general-purpose on Sonnet' : 'router off'
   const cap = budgetUsd === undefined ? 'no spend cap' : `$${budgetUsd.toFixed(2)} cap per subagent`
   return `pennycrab is set for ${who}: ${cache} · ${route} · ${cap}. /plugin configure pennycrab to change it.`
 }
