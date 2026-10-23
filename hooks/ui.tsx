@@ -330,14 +330,14 @@ function chip(x: number, y: number, s: string, color?: string) {
 }
 const ENDED: Partial<Record<Agent['status'], string>> = { completed: '✓ done', failed: '✗ failed', stopped: '✗ stopped' }
 const chipsOf = (a: Agent): [string, string?][] =>
-  [
+  ([
     a.trip ? ([tripLabel(a)!, WARN] as [string, string]) : undefined,
     [NAME[a.tier], COLOR[a.tier]] as [string, string],
     a.routedFrom ? [`↓ from ${NAME[tierOf(a.routedFrom)]}`] : undefined,
     a.effort ? [a.effort] : undefined,
     a.currentTool ? [`▶ ${a.currentTool}`] : undefined,
     !isLive(a) && !a.trip && ENDED[a.status] ? [ENDED[a.status]!] : undefined,
-  ].filter((c): c is [string, string?] => c !== undefined)
+  ] as ([string, string?] | undefined)[]).filter((c): c is [string, string?] => c !== undefined)
 
 // One subagent as a card: its crab, title and chips, its cost and figures on the right, its context bar.
 const ROW_H = 70
