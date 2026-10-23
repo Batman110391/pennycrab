@@ -28,7 +28,7 @@ export function routeFor(mode: RouterMode, type: string, parentModel: string): P
 }
 
 // Where the user already picks subagent models, or aliases may resolve elsewhere, the router stays out.
-async function isOptedOut($: EngineInterface) {
+export async function isOptedOut($: EngineInterface) {
   return Boolean(
     (await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) ||
       (await $.env.get('CLAUDE_CODE_USE_BEDROCK')) ||

@@ -658,6 +658,17 @@ const FIELDS: Field[] = [
       })[v] ?? '',
   },
   {
+    field: 'delegate',
+    values: ['on', 'off'],
+    section: 'ROUTER',
+    name: 'Tell Claude when to hand searches to Explore',
+    def: 'on',
+    hint: v =>
+      v === 'on'
+        ? 'Wide searches go to Explore on Haiku; code changes stay with your model. Needs the router on auto or explore.'
+        : 'Claude is not told: it spawns subagents as it would without pennycrab.',
+  },
+  {
     field: 'forecast',
     values: ['on', 'nudge', 'off'],
     section: 'GUARD',

@@ -2,6 +2,7 @@ import type { Register } from 'claude-code'
 
 import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from './cache'
 import type { KeepWarm } from './cache'
+import { composeRule, delegateOf, describeAgent } from './delegate'
 import { forecastFor, forecastModeOf, keyOf, learn } from './forecast'
 import { afterTool, budgetOf, denyOf, forget, guardStep, handBackAlone, stopOf } from './guard'
 import type { Budget, Limits } from './guard'
@@ -22,6 +23,7 @@ export const register: Register = (on, options) => {
   let project = ''
   const warm = keepWarmOf(options.keepWarm as KeepWarm | undefined)
   const display = displayOf(options)
+  const isDelegating = delegateOf(options.delegate)
   useUnits(unitsOf(options.units))
 
   on('session.start', async ($, e, next) => {
@@ -53,6 +55,9 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => renderBand($, e, next, display)).catch(($, e, next) => next(e))
+
+  on('prompt.compose', ($, e, next) => composeRule($, e, next, mode, isDelegating)).catch(($, e, next) => next(e))
+  on('tool.describe', { tool: 'Agent' }, ($, e, next) => describeAgent($, e, next, mode, isDelegating)).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const { started, route } = await spawnRouted($, e, next, mode)

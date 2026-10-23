@@ -392,7 +392,7 @@ test('settings, on a host that lists no plugin options: the loaded options, a pi
   const selects = (await ui.findAll({ type: 'Select' })).map(e => (e as { props: { key?: unknown; value?: unknown } }).props)
   await ui.select({ key: 'pennycrab-units', value: 'tokens' })
   await ui.unmount()
-  expect(selects.length).toBe(8)
+  expect(selects.length).toBe(9)
   expect(selects.find(p => p.key === 'pennycrab-router')!.value).toBe('explore')
   expect(runs).toEqual([{ argv: ['claude', 'plugin', 'configure', 'pennycrab@pennycrab', '--values-stdin'], stdin: '{"units":"tokens"}' }])
 })

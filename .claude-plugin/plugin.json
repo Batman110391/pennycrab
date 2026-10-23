@@ -1,6 +1,6 @@
 {
   "name": "pennycrab",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live panel",
   "author": {
     "name": "Batman110391"
@@ -27,6 +27,13 @@
         "off"
       ],
       "default": "auto"
+    },
+    "delegate": {
+      "type": "string",
+      "title": "Tell Claude when to hand searches to Explore",
+      "description": "on: Claude's instructions say Explore runs on Haiku, so wide searches go there and code changes stay with your model; on the Pro plan, the engine's line against spawning is kept for code alone. Only while the router is on auto or explore. off: Claude is not told.",
+      "options": ["on", "off"],
+      "default": "on"
     },
     "budget": {
       "type": "string",

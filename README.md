@@ -15,6 +15,7 @@
 ## What it does
 
 - **Explore runs on Haiku.** The built-in Explore subagent only reads and searches, so it runs on the cheapest model, whatever model your session uses. General-purpose subagents, which also edit, run on Sonnet when your session is on Opus or Fable.
+- **Claude is told to hand wide searches to Explore.** Without it, Claude thinks a subagent costs what it costs, and on the Pro plan Claude Code tells it to spawn none, so there is nothing to move to Haiku. pennycrab adds a short rule to Claude's instructions: searches across many files go to Explore, code changes stay with your model.
 - **Your cache stays warm while you are away.** Shortly before the conversation's prompt cache expires, one small ping renews it. The message you send when you come back reads the conversation from the cache instead of paying to write it again.
 - **Runaway subagents hand back what they found.** pennycrab learns how many tokens your runs of each kind take. A subagent far past that, or one repeating the same call, is asked to wrap up and hand back what it has, so the work already paid for is not lost.
 - **A live panel shows it all.** One crab per subagent, dressed for the model it runs on, with its tokens, cost and time; what was saved; how long the cache stays warm.
@@ -74,6 +75,7 @@ Set them from **⚙ Settings**, in the config menu, or with `/plugin configure p
 | Option | Values | Default | What it does |
 | --- | --- | --- | --- |
 | `router` | `auto`, `explore`, `prudent`, `off` | `auto` | Which subagents move to a cheaper model. See [Router](#router). |
+| `delegate` | `on`, `off` | `on` | Whether Claude is told that Explore runs on Haiku, so it hands wide searches there and keeps code changes. See [Delegation](#delegation). |
 | `forecast` | `on`, `nudge`, `off` | `on` | `on`: a nudge past the forecast, a handover past twice it. `nudge`: the nudge only. See [Forecast](#forecast). |
 | `budget` | `1`, `2`, `5`, `10`, `20`, `50` (USD), `off` | `off` | A spend cap per subagent, on top of the forecast. |
 | `keepWarm` | `auto`, `30m`, `1h`, `2h`, `4h`, `8h`, `off` | `auto` | How long the cache is kept warm after your last message. See [Keep-warm](#keep-warm). |
@@ -90,6 +92,19 @@ Set them from **⚙ Settings**, in the config menu, or with `/plugin configure p
 - `off`: every subagent on your model.
 
 Never a model above yours. Left alone: a subagent type you defined, an explicit model in the Agent call, a fork, `CLAUDE_CODE_SUBAGENT_MODEL`, Bedrock, Vertex and Foundry.
+
+### Delegation
+
+With `delegate` on and the router on `auto` or `explore`, Claude's instructions gain a short rule (a few hundred tokens, read from the cache after the first request):
+
+- Explore runs on Haiku: a wide search (where something is done, how a flow runs, what uses a symbol) goes there, with a short report and file:line references that Claude checks before acting on them.
+- A known file, a narrow lookup or a code change stays with your model.
+
+On the Pro plan Claude Code tells Claude not to spawn subagents unless you ask, because a subagent re-reads at your model's price. That holds for subagents that write code, so pennycrab keeps the line for them and lifts it for Explore alone.
+
+Measured on a Pro account (five-hour limit, read before and after each load): 101K new tokens read by Opus moved the limit 3 points; 283K read by Haiku moved it 0. The limit follows price, not tokens.
+
+The rule is left out while the router does not move Explore to Haiku: `prudent`, `off`, a session already on Haiku, or a setting that keeps the router out.
 
 ### Forecast
 
@@ -146,7 +161,8 @@ Nothing of it leaves your machine.
 - **The hand-back pennycrab makes for a subagent that ignores the refusals has not been seen live.** In the live tests, every subagent handed back by itself once refused.
 - **The first 10 runs of each kind have no forecast.** Until then only the loop check and the spend cap, if set, hand a subagent back.
 - **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. A subagent that is running at that moment carries on, and its row keeps counting its tokens (checked live).
-- **Tokens assume the quota weighs models by price.** Anthropic does not document how a subscription's 5-hour and weekly limits weigh one model against another; the token figures read ≈ for that reason.
+- **Tokens assume the quota weighs models by price.** Anthropic does not document how a subscription's 5-hour and weekly limits weigh one model against another. One measurement on a Pro account agrees (see [Delegation](#delegation)); the token figures still read ≈.
+- **Claude may not follow the delegation rule.** It is an instruction, not a switch: the panel shows what was actually saved.
 - **Settings has no menus on mobile**, where the elements pennycrab draws have no menu. Change the options from a computer.
 - **A narrow terminal** (around 40 columns) has not been tuned.
 
