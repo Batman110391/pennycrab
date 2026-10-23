@@ -67,7 +67,6 @@ function engine(on: On, o: World = {}) {
     if (sent.modelMs) await clock.sleep(sent.modelMs)
     return { value: sent.model } as never
   })
-  on('command.register', async () => ({ value: undefined }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', async () => ({ text: '' }))
@@ -363,9 +362,9 @@ test('the cache line ends on Cache expired whenever the last redraw landed', { o
   await start($)
   await clock.set(T0 + 500)
   await turn($, 'm1')
-  // /pennycrab redraws at 4:59.7 after the request, 0.3s before the entry lapses, between two ticks.
+  // /pennycrab:pennycrab redraws at 4:59.7 after the request, 0.3s before the entry lapses, between two ticks.
   await clock.set(T0 + 300_200)
-  await $.command.run({ command: 'pennycrab', args: '' } as never)
+  await $.command.run({ command: 'pennycrab:pennycrab', args: '' } as never)
   await clock.advance(10 * MIN)
   expect(await paneText($, /^Cache /)).toEqual(['Cache expired'])
 })

@@ -7,17 +7,17 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/pane-dark.png">
-    <img src="assets/pane-light.png" width="900" alt="The pennycrab pane in three states: before any subagent, with two subagents at work and one done, and with one handed back by the token forecast">
+    <img src="assets/pane-light.png" width="900" alt="The pennycrab panel in three states: before any subagent, with two subagents at work and one done, and with one handed back by the token forecast">
   </picture>
 </p>
-<p align="center"><sub>The pane as pennycrab draws it in the desktop app, from its own drawing code.</sub></p>
+<p align="center"><sub>The panel as pennycrab draws it in the desktop app, from its own drawing code.</sub></p>
 
 ## What it does
 
 - **Explore runs on Haiku.** The built-in Explore subagent only reads and searches, so it runs on the cheapest model, whatever model your session uses. General-purpose subagents, which also edit, run on Sonnet when your session is on Opus or Fable.
 - **Your cache stays warm while you are away.** Shortly before the conversation's prompt cache expires, one small ping renews it. The message you send when you come back reads the conversation from the cache instead of paying to write it again.
 - **Runaway subagents hand back what they found.** pennycrab learns how many tokens your runs of each kind take. A subagent far past that, or one repeating the same call, is asked to wrap up and hand back what it has, so the work already paid for is not lost.
-- **A live pane shows it all.** One crab per subagent, dressed for the model it runs on, with its tokens, cost and time; what was saved; how long the cache stays warm.
+- **A live panel shows it all.** One crab per subagent, dressed for the model it runs on, with its tokens, cost and time; what was saved; how long the cache stays warm.
 
 ## Does it cost quality?
 
@@ -56,14 +56,14 @@ Answer `y` to add the marketplace, then pick a scope. In the desktop app, where 
 
 ## What you see
 
-- **The band above the prompt.** The crabs at work and how many, what was spent and saved, and two buttons: **Pane** and **⚙ Settings**.
-- **The pane** (the **Pane** button, or `/pennycrab`). At the top: what was saved, what was spent, the main context, and the cache as a ring that empties as it nears its lapse. Below, one card per subagent, running ones first:
+- **The band above the prompt.** The crabs at work and how many, what was spent and saved, and two buttons: **Panel** and **⚙ Settings**.
+- **The panel** (the **Panel** button, or `/pennycrab:pennycrab`). At the top: what was saved, what was spent, the main context, and the cache as a ring that empties as it nears its lapse. Below, one card per subagent, running ones first:
   - its model, and the one it was moved from;
   - the tool it is using;
   - its context, its tokens against its forecast, its cost and time.
 
-  A subagent that was handed back moves under **Guard**, with why: over forecast, loop or over budget. The pane opens by itself when a wave of subagents starts, where it docks beside the conversation.
-- **Settings** (the **⚙ Settings** button, or `/pennycrab settings`). One menu per option below, each with a line on what its value does, and **Reset to defaults**. A change applies at once.
+  A subagent that was handed back moves under **Guard**, with why: over forecast, loop or over budget. The panel opens by itself when a wave of subagents starts, where it docks beside the conversation.
+- **Settings** (the **⚙ Settings** button, or `/pennycrab:pennycrab settings`). One menu per option below, each with a line on what its value does, and **Reset to defaults**. A change applies at once.
 - **The status line.** Up to two running subagents with their model's letter, context and time, then what was saved.
 - **A toast after your first message.** What pennycrab found and chose: a Claude subscription or pay-per-token use, how long your cache lasts, where Explore and general-purpose run, the forecast and the spend cap. It shows again only when one of those changes.
 
@@ -80,7 +80,7 @@ Set them from **⚙ Settings**, in the config menu, or with `/plugin configure p
 | `units` | `usd`, `tokens` | `usd` | Spend and savings in dollars, or in tokens of your main model at its input price (≈ Opus tokens on Opus). See [How the numbers are counted](#how-the-numbers-are-counted). |
 | `band` | `always`, `working`, `off` | `always` | When the band shows: always, only while subagents run, or never. |
 | `statusLine` | `on`, `off` | `on` | The crabs at work on the status line. |
-| `autoOpen` | `on`, `off` | `on` | Whether the pane opens by itself when a wave of subagents starts. |
+| `autoOpen` | `on`, `off` | `on` | Whether the panel opens by itself when a wave of subagents starts. |
 
 ### Router
 
@@ -117,7 +117,7 @@ The spend cap hands a subagent over the same way.
 - **Cost** of a subagent is priced per request from the API's token counts. The session's total is Claude Code's own, as `/cost` shows it.
 - **Saved** adds two things:
   - for a routed subagent, the gap between what each request cost and what the same tokens would have cost on the model it would have run on (your session's, or Opus for an Explore under Fable, where Claude Code runs it on Opus);
-  - for the cache, the cost of rewriting what your next message read from the cache, counted only when the cache would have expired without the pings, minus what every ping cost. Pings for a session you never come back to are a loss, and the pane shows it as one (−$0.02).
+  - for the cache, the cost of rewriting what your next message read from the cache, counted only when the cache would have expired without the pings, minus what every ping cost. Pings for a session you never come back to are a loss, and the panel shows it as one (−$0.02).
 - **The first ping after a turn** can write a part of the conversation to the cache again, once: a ping sends the conversation as the transcript holds it, which can differ a little from how the turn's own request went out. `auto` counts that cost.
 - **On a subscription** nothing is billed per token: the dollars are list-price equivalents of what counts against your plan's 5-hour and weekly limits.
 - **In tokens** (`units: tokens`), every dollar figure is divided by your main model's price per input token: on Opus 5.5, $1 is 250K Opus tokens. A cache read then weighs a twentieth of a token and an output token five, as their prices do. It is the same count as the dollars, in the unit a subscription's quota is spent in.
@@ -136,7 +136,7 @@ Nothing of it leaves your machine.
 ## What goes over the network
 
 - Once a day at most, a plain GET of the pricing page. Nothing is sent.
-- Each keep-warm ping is one request to the model through your own session, like a short message. It counts toward your cost or your plan's limits, and the pane shows how many were sent and what they cost.
+- Each keep-warm ping is one request to the model through your own session, like a short message. It counts toward your cost or your plan's limits, and the panel shows how many were sent and what they cost.
   - A ping the API refuses (overloaded, rate limited) is tried again 15 seconds later, until the cache would have expired.
   - None goes out after `/model` moves the session to another model family, which has no cache to keep.
 

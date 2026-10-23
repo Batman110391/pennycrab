@@ -26,7 +26,6 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     project = e.cwd
-    await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost. /pennycrab settings: its options' })
     await loadStoredPrices($)
     // The page again every ten minutes while the kept prices are a day old or missing (no network at the start).
     void refreshPrices($).catch(() => undefined)
@@ -38,9 +37,10 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'pennycrab' }, async ($, e) => {
+  // The command is commands/pennycrab.md's, under the plugin's namespace; the mod answers it in place of its text.
+  on('command.run', { command: 'pennycrab:pennycrab' }, async ($, e) => {
     if (e.args.trim() === 'settings') return { text: (await openSettings($), 'Pennycrab settings opened.') }
-    return { text: (await togglePane($)) ? 'Pennycrab pane opened.' : 'Pennycrab pane closed.' }
+    return { text: (await togglePane($)) ? 'Pennycrab panel opened.' : 'Pennycrab panel closed.' }
   })
 
   on('ui.render', { component: 'Pane', requestId: 'pennycrab' }, ($, e) => renderPane($, e, display))
@@ -48,7 +48,7 @@ export const register: Register = (on, options) => {
 
   // Nothing on screen says how a closed pane comes back, so the close says it.
   on('ui.close', ($, e, next) => {
-    if (e.id === 'pennycrab' && e.origin.kind === 'person') $.ui.toast('Pennycrab closed. Type /pennycrab to bring it back.')
+    if (e.id === 'pennycrab' && e.origin.kind === 'person') $.ui.toast('Pennycrab closed. Type /pennycrab:pennycrab to bring it back.')
     return next(e)
   })
 

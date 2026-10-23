@@ -31,7 +31,6 @@ async function session($: Engine, on: On) {
   mock.env(on, {})
   mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => {
     opens.n++
     return { value: { isPlaced: true } } as never
@@ -79,7 +78,6 @@ test('the band shows up once a subagent starts under a mounted band, prompt idle
   mock.env(on, {})
   mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   // Stands for the engine's own band, which draws an empty row when no plugin draws.
@@ -103,7 +101,6 @@ test('the pane opens once per wave of subagents, not on every spawn', async ($: 
   mock.env(on, {})
   mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: `a${++n}` }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => {
     opened++
     return { value: { isPlaced: true } } as never
@@ -122,7 +119,6 @@ test('the status line counts a running subagent each second, then clears once it
   const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   mock.env(on, { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5-5' })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'a1' }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('ui.status', async (_$, e) => {
     lines.push(e.text)
@@ -144,7 +140,6 @@ test('the status line marks a model pennycrab cannot name with ?, not the O of O
   const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   mock.env(on, { CLAUDE_CODE_SUBAGENT_MODEL: 'mystery-model' })
   on('agent.spawn', async () => ({ model: 'mystery-model', agentId: 'a1' }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('ui.status', async (_$, e) => {
     lines.push(e.text)
@@ -191,7 +186,6 @@ function crew(on: On, panes: { id: string; isPlaced: boolean }[] = []) {
   mock.env(on, {})
   const clock = mock.clock(on, { now: Date.parse('2026-10-22T10:00:00Z') })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: `a${++n}` }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => {
     sent.opened++
     return { value: { isPlaced: true } } as never
@@ -237,11 +231,11 @@ test('on the terminal\'s main screen a wave does not open the pane unasked: it w
   expect(sent.opened).toBe(0)
 })
 
-test('/pennycrab shows a pane that was opened unasked and waits undrawn, rather than closing it', async ($: Engine, on) => {
+test('/pennycrab:pennycrab shows a pane that was opened unasked and waits undrawn, rather than closing it', async ($: Engine, on) => {
   const { sent } = crew(on, [{ id: 'pennycrab', isPlaced: false }])
   await begin($)
-  const r = await $.command.run({ command: 'pennycrab', args: '' } as never)
-  expect({ text: (r as { text?: string }).text, opened: sent.opened }).toEqual({ text: 'Pennycrab pane opened.', opened: 1 })
+  const r = await $.command.run({ command: 'pennycrab:pennycrab', args: '' } as never)
+  expect({ text: (r as { text?: string }).text, opened: sent.opened }).toEqual({ text: 'Pennycrab panel opened.', opened: 1 })
 })
 
 test('the band counts running subagents only', async ($: Engine, on) => {
@@ -316,7 +310,7 @@ test('band buttons: Pane opens the pane, ⚙ Settings opens the settings', async
   await band.press({ key: 'pennycrab-pane' })
   await band.press({ key: 'pennycrab-settings' })
   await band.unmount()
-  expect({ buttons, opened: opens.n - before }).toEqual({ buttons: ['Pane', '⚙ Settings'], opened: 2 })
+  expect({ buttons, opened: opens.n - before }).toEqual({ buttons: ['Panel', '⚙ Settings'], opened: 2 })
 })
 
 // Stands for the engine's own band, drawn once ours steps aside.
@@ -335,7 +329,7 @@ test('band "working": no bar while no subagent runs', { options: { band: 'workin
   await spawnOne($, 'One')
   const working = await labels(band)
   await band.unmount()
-  expect({ idle, working }).toEqual({ idle: [], working: ['Pane', '⚙ Settings'] })
+  expect({ idle, working }).toEqual({ idle: [], working: ['Panel', '⚙ Settings'] })
 })
 
 test('band "off" and status line "off": neither draws', { options: { band: 'off', statusLine: 'off' } }, async ($: Engine, on) => {
@@ -429,10 +423,10 @@ test('settings: Reset sets back what differs from the defaults, the locked row l
   ])
 })
 
-test('/pennycrab settings opens the settings pane', async ($: Engine, on) => {
+test('/pennycrab:pennycrab settings opens the settings pane', async ($: Engine, on) => {
   const opens = await session($, on)
   const before = opens.n
-  const r = await $.command.run({ command: 'pennycrab', args: 'settings' } as never)
+  const r = await $.command.run({ command: 'pennycrab:pennycrab', args: 'settings' } as never)
   expect({ text: (r as { text?: string }).text, opened: opens.n - before }).toEqual({ text: 'Pennycrab settings opened.', opened: 1 })
 })
 

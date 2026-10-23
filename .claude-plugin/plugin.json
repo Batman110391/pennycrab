@@ -1,7 +1,7 @@
 {
   "name": "pennycrab",
-  "version": "0.7.2",
-  "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
+  "version": "0.7.3",
+  "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live panel",
   "author": {
     "name": "Batman110391"
   },
@@ -102,8 +102,8 @@
     },
     "autoOpen": {
       "type": "string",
-      "title": "Open the pane by itself",
-      "description": "on: the pane opens when a wave of subagents starts, where it docks beside the chat. off: only from /pennycrab or the bar.",
+      "title": "Open the panel by itself",
+      "description": "on: the panel opens when a wave of subagents starts, where it docks beside the chat. off: only from /pennycrab:pennycrab or the bar.",
       "options": [
         "on",
         "off"

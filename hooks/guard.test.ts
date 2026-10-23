@@ -58,7 +58,6 @@ async function session($: Engine, on: On, isFinal = false, isUsageDown = false, 
   mock.clock(on, { now: T0 })
   mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) }, history })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('ui.toast', async (_$, e) => {
     sent.toasts.push(e.text)

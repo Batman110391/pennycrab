@@ -630,7 +630,7 @@ export async function renderBand(
         <Text bold={s.usd > 0} color={s.usd > 0 ? 'success' : s.usd < 0 ? 'error' : undefined} dimColor={s.usd === 0}>
           {live.length || s.usd === 0 ? saved : `${saved} this session`}
         </Text>
-        <Button key="pennycrab-pane" plain label="Pane" onPress={() => void togglePane($)} />
+        <Button key="pennycrab-pane" plain label="Panel" onPress={() => void togglePane($)} />
         <Button key="pennycrab-settings" plain label="⚙ Settings" onPress={() => void openSettings($)} />
       </Box>
       {below && <Box marginTop={1}>{below}</Box>}
@@ -710,11 +710,11 @@ const FIELDS: Field[] = [
     section: 'DISPLAY',
     name: 'Bar above the prompt',
     def: 'always',
-    hint: v => ({ always: 'The savings and the Settings button stay in reach.', working: 'Only while subagents run.', off: 'No bar: Settings is then /pennycrab settings.' })[v] ?? '',
+    hint: v => ({ always: 'The savings and the Settings button stay in reach.', working: 'Only while subagents run.', off: 'No bar: Settings is then /pennycrab:pennycrab settings.' })[v] ?? '',
     label: v => (v === 'working' ? 'while subagents work' : v),
   },
   { field: 'statusLine', values: ['on', 'off'], section: 'DISPLAY', name: 'Status line', def: 'on', hint: () => "The crabs at work and their time, above Claude's own line." },
-  { field: 'autoOpen', values: ['on', 'off'], section: 'DISPLAY', name: 'Open the pane by itself', def: 'on', hint: () => 'When a wave of subagents starts, where the pane docks beside the chat.' },
+  { field: 'autoOpen', values: ['on', 'off'], section: 'DISPLAY', name: 'Open the panel by itself', def: 'on', hint: () => 'When a wave of subagents starts, where the panel docks beside the chat.' },
 ]
 // A row of ours: `<plugin>.<field>`, the plugin named as installed (pennycrab, or pennycrab@<marketplace>).
 const fieldOf = (key: string) => (/^pennycrab(@[^.]*)?\./.test(key) ? key.slice(key.indexOf('.') + 1) : undefined)

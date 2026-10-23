@@ -109,7 +109,6 @@ function world(on: On, stored: unknown, page: Page | (() => Page), ctx?: { token
     if (p === 'down') throw new Error('offline')
     return { value: { status: p.ok ? 200 : 503, ok: p.ok, headers: {}, text: p.text } } as never
   })
-  on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   on('session.usage', async (_$, e) => {

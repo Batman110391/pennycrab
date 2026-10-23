@@ -1,5 +1,5 @@
 ---
-description: Open or close the pennycrab pane; /pennycrab settings opens its settings
+description: Open or close the pennycrab panel; /pennycrab:pennycrab settings opens its settings
 argument-hint: "[settings]"
 ---
-Open the pennycrab pane.
+Open the pennycrab panel.
