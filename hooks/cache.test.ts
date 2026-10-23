@@ -40,7 +40,7 @@ test('an entry past its end has lapsed: no ping is sent into it', () => {
 test('the cache line says how long the cache stays warm and what the pings cost, ? with no prices', () => {
   const c: Cache = { ...NO_CACHE, ttlMs: 5 * MIN, lastRequestAt: T0, lastTurnAt: T0, pings: 2, pingUsd: 0.04 }
   usePrices(undefined)
-  expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ≈?')
+  expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ?')
   usePrices({ fetchedAt: T0, models: parsePricing(PRICING_PAGE)! })
   expect(cacheLine(c, T0 + 61_000)).toBe('Cache warm · 4m left · 2 pings ≈$0.04')
   expect(cacheLine({ ...c, pings: 0 }, T0 + 6 * MIN)).toBe('Cache expired')

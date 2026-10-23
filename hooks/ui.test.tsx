@@ -67,7 +67,7 @@ test('desktop: the pane draws its head, a section and one row as Svg, the band o
   // The description reaches the markup escaped, and the row's figures stay apart once SVG folds its spaces.
   expect(markup).toContain('Find the &#60;auth&#62; flow')
   expect(markup).not.toContain('<auth>')
-  expect(markup).toContain('ctx 0% · 0 tok · 0s')
+  expect(markup).toContain('0 tok · 0s')
   expect(markup).toContain('≈$0.00')
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
   const bandSvg = (await band.findAll({ type: 'Svg' })).length
@@ -415,4 +415,14 @@ test('/pennycrab settings opens the settings pane', async ($: Engine, on) => {
   const before = opens.n
   const r = await $.command.run({ command: 'pennycrab', args: 'settings' } as never)
   expect({ text: (r as { text?: string }).text, opened: opens.n - before }).toEqual({ text: 'Pennycrab settings opened.', opened: 1 })
+})
+
+test('a narrow desktop pane wraps what pennycrab does onto more lines rather than cutting it', async ($: Engine, on) => {
+  crew(on)
+  await begin($)
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...PANE, props: { ...(PANE.props as object), bodyColumns: 38 } as never })
+  const markup = (await ui.findAll({ type: 'Svg' })).map(e => String((e as { props?: { source?: unknown } }).props?.source)).join('')
+  await ui.unmount()
+  expect(markup).not.toContain('…')
+  expect(markup).toContain('>past its forecast<')
 })

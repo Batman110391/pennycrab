@@ -33,6 +33,8 @@ export const fmtUsd = (n: number): string => (n < 0 ? `−${fmtUsd(-n)}` : n > 0
 const fmtPriced = (n: number) => (priceBook() ? fmtUsd(n) : '?')
 // A row's cost; '?' once a request of it ran on a model the page does not list.
 const fmtCost = (a: Agent) => (a.isUnpriced ? '?' : fmtUsd(a.costUsd))
+// About an amount; "<$0.01" and "?" already say they are not exact.
+const approx = (s: string) => (/^[<?]/.test(s) ? s : `≈${s}`)
 export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${n}`)
 export function fmtTime(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -58,6 +60,23 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 // Rough pixel width of UI text: wide scripts and emoji take a full em, the rest a bit over half.
 const em = (ch: string) => (/[　-鿿가-힯＀-￯\u{1f300}-\u{1faff}]/u.test(ch) ? 1 : 0.58)
 const widthOf = (s: string, size: number) => [...s].reduce((w, ch) => w + em(ch) * size, 0)
+// The first of the wordings that fits, else the last.
+const fitOf = (ss: string[], size: number, maxW: number) => ss.find(x => widthOf(x, size) <= maxW) ?? ss[ss.length - 1]!
+// Words in lines of at most maxW; past `max` lines the last one is clipped.
+function wrap(s: string, size: number, maxW: number, max = 2) {
+  const out: string[] = []
+  let line = ''
+  for (const word of s.split(' ')) {
+    const next = line ? `${line} ${word}` : word
+    if (!line || widthOf(next, size) <= maxW) line = next
+    else {
+      out.push(line)
+      line = word
+    }
+  }
+  out.push(line)
+  return [...out.slice(0, max - 1), out.slice(max - 1).join(' ')].filter(Boolean).map(l => clip(l, size, maxW))
+}
 export function clip(s: string, size: number, maxW: number) {
   if (widthOf(s, size) <= maxW) return s
   let w = widthOf('…', size)
@@ -233,6 +252,8 @@ function ringOf(c: Cache, at: number, cx: number, cy: number) {
 // and the main thread's context.
 const HERO_H = 118
 function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, mainPct: number) {
+  const spent = approx(fmtUsd(cost))
+  const would = priceBook() ? fmtUsd(cost + saved) : '?'
   const hasRing = c.ttlMs !== null && c.lastRequestAt !== null
   const room = w - (hasRing ? 124 : 32)
   const bx = 122
@@ -243,7 +264,7 @@ function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, m
     `<rect class="card" x="0" y="0" width="${w}" height="${HERO_H}" rx="12"/>` +
       label(16, 26, 10, 'dim', 'SAVED THIS SESSION', SB) +
       label(16, 62, 34, saved > 0 ? 'good' : saved < 0 ? 'bad' : 'fg', fmtPriced(saved), B) +
-      label(16, 82, 11, 'dim', clip(`spent ≈${fmtUsd(cost)} · would have been ${priceBook() ? fmtUsd(cost + saved) : '?'}`, 11, room)) +
+      label(16, 82, 11, 'dim', clip(saved === 0 ? `spent ${spent}` : fitOf([`spent ${spent} · would have been ${would}`, `spent ${spent}, not ${would}`], 11, room), 11, room)) +
       label(16, 104, 10.5, 'dim', `Main context ${mainPct}%`) +
       `<rect class="track" x="${bx}" y="99" width="${bw}" height="5" rx="2.5"/><rect class="fg" fill-opacity=".55" x="${bx}" y="99" width="${Math.round((bw * mainPct) / 100)}" height="5" rx="2.5"/>` +
       (hasRing ? ringOf(c, at, w - 54, 50) : ''),
@@ -252,27 +273,41 @@ function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, m
 
 // One faint line under the head: what the keep-warm cost, or what a subscription's dollars mean.
 const NOTE_H = 20
-const noteSvg = (w: number, s: string) => svg(w, NOTE_H, label(2, 13, 10.5, 'faint', clip(s, 10.5, w - 4)))
+// A note on one line, or two in a narrow pane.
+function noteOf(w: number, s: string) {
+  const lines = wrap(s, 10.5, w - 4)
+  const height = NOTE_H + (lines.length - 1) * 14
+  return { source: svg(w, height, lines.map((l, i) => label(2, 13 + i * 14, 10.5, 'faint', l)).join('')), height }
+}
 const pingNote = (c: Cache) =>
-  c.pings ? `Kept warm while away: ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtPriced(c.pingUsd)}${c.savedUsd > 0 ? ` · saved ${fmtUsd(c.savedUsd)} of rewrites` : ''}` : undefined
+  c.pings ? `Kept warm while away: ${c.pings} ping${c.pings === 1 ? '' : 's'} ${approx(fmtPriced(c.pingUsd))}${c.savedUsd > 0 ? ` · saved ${fmtUsd(c.savedUsd)} of rewrites` : ''}` : undefined
 // shortcut: a TTL set by a variable or setting hides the account, so no note then; add a field if that matters.
 const isPlan = (c: Cache) => c.ttlSource === 'plan' || c.ttlSource === 'plan-over'
 const PLAN_NOTE = 'ⓘ Subscription: dollars are list-price equivalents, counted against your usage limits.'
 
-// What pennycrab does, while no subagent has started yet.
-const EMPTY_H = 150
-function emptySvg(w: number) {
-  const x = w < 360 ? 16 : 100
-  const items = ['Sends Explore and helper subagents to a cheaper model', 'Hands back a subagent that runs far past its forecast', 'Keeps the prompt cache warm while you are away']
-  return svg(
-    w,
-    EMPTY_H,
-    `<rect class="card" x="0" y="0" width="${w}" height="${EMPTY_H}" rx="12"/>` +
-      (w < 360 ? '' : crab(20, 34, 'other', true, 4)) +
-      label(x, 34, 13, 'fg', clip('Pennycrab is watching this session', 13, w - x - 12), B) +
-      items.map((s, i) => `<circle class="good" cx="${x + 6}" cy="${58 + i * 24}" r="3"/>` + label(x + 16, 62 + i * 24, 11, 'dim', clip(s, 11, w - x - 28))).join('') +
-      label(x, 136, 10.5, 'faint', clip('Subagents show up here as they start.', 10.5, w - x - 12)),
-  )
+// What pennycrab does, while no subagent has started yet; its lines wrap in a narrow pane, so its height follows.
+function emptyOf(w: number) {
+  const isWide = w >= 420
+  const x = isWide ? 100 : 16
+  const items = ['Moves Explore and helper subagents to a cheaper model', 'Hands back a subagent that runs far past its forecast', 'Keeps the prompt cache warm while you are away']
+  let y = 34
+  let body = ''
+  for (const l of wrap('Pennycrab is watching this session', 13, w - x - 12)) {
+    body += label(x, y, 13, 'fg', l, B)
+    y += 17
+  }
+  y += 7
+  for (const item of items) {
+    const lines = wrap(item, 11, w - x - 28)
+    body += `<circle class="good" cx="${x + 6}" cy="${y - 4}" r="3"/>` + lines.map((l, i) => label(x + 16, y + i * 15, 11, 'dim', l)).join('')
+    y += 15 * lines.length + 9
+  }
+  body += label(x, y + 4, 10.5, 'faint', clip('Subagents show up here as they start.', 10.5, w - x - 12))
+  const height = Math.max(150, y + 20)
+  return {
+    source: svg(w, height, `<rect class="card" x="0" y="0" width="${w}" height="${height}" rx="12"/>` + (isWide ? crab(20, 34, 'other', true, 4) : '') + body),
+    height,
+  }
 }
 
 // A section's name and count over a hairline, with room above it so sections do not run together.
@@ -296,10 +331,10 @@ function chip(x: number, y: number, s: string, color?: string) {
 const ENDED: Partial<Record<Agent['status'], string>> = { completed: '✓ done', failed: '✗ failed', stopped: '✗ stopped' }
 const chipsOf = (a: Agent): [string, string?][] =>
   [
-    [NAME[a.tier], COLOR[a.tier]] as [string, string],
     a.trip ? ([tripLabel(a)!, WARN] as [string, string]) : undefined,
-    a.effort ? [a.effort] : undefined,
+    [NAME[a.tier], COLOR[a.tier]] as [string, string],
     a.routedFrom ? [`↓ from ${NAME[tierOf(a.routedFrom)]}`] : undefined,
+    a.effort ? [a.effort] : undefined,
     a.currentTool ? [`▶ ${a.currentTool}`] : undefined,
     !isLive(a) && !a.trip && ENDED[a.status] ? [ENDED[a.status]!] : undefined,
   ].filter((c): c is [string, string?] => c !== undefined)
@@ -310,14 +345,16 @@ function rowSvg(w: number, a: Agent, at: number) {
   const x = 52
   const tw = w - x - 14
   const ctx = ctxOf(a)
-  const cost = `≈${fmtCost(a)}`
-  const figures = `ctx ${ctx}% · ${tokOf(a)} · ${fmtTime(elapsed(a, at))}`
+  const cost = `${approx(fmtCost(a))}`
+  // The context shows as the bar beneath; the figures keep to what a chip cannot say.
+  const figures = `${tokOf(a)} · ${fmtTime(elapsed(a, at))}`
   const chipsEnd = w - 14 - widthOf(figures, 10.5) - 10
   let cx = x
   let chips = ''
   for (const [s, color] of chipsOf(a)) {
     const c = chip(cx, 32, s, color)
-    if (cx + c.width > chipsEnd && cx > x) break
+    // The guard's reason comes first and always shows; a chip with no room makes way for a shorter one.
+    if (cx + c.width > chipsEnd && cx > x) continue
     chips += c.markup
     cx += c.width + 5
   }
@@ -344,7 +381,7 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
     32,
     shown.map((a, i) => crab(i * 36, 2, costumeOf(a), isLive(a), 2)).join('') +
       (rest ? label(shown.length * 36 + 4, 21, 12, 'dim', `+${rest}`) : '') +
-      label(w, 21, 12, 'dim', `≈${fmtUsd(cost)} · saved ${fmtPriced(saved)}`, ' text-anchor="end"'),
+      label(w, 21, 12, 'dim', `${approx(fmtUsd(cost))} · saved ${fmtPriced(saved)}`, ' text-anchor="end"'),
   )
 }
 
@@ -370,7 +407,7 @@ export function cacheLine(c: Cache, at: number) {
   const mins = Math.ceil(left / 60_000)
   const leftText = mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
   const state = c.isTurnOpen ? 'Cache in use' : left > 0 ? `Cache warm · ${leftText} left` : 'Cache expired'
-  const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ≈${fmtPriced(c.pingUsd)}` : ''
+  const pings = c.pings ? ` · ${c.pings} ping${c.pings === 1 ? '' : 's'} ${approx(fmtPriced(c.pingUsd))}` : ''
   return state + pings
 }
 // The line's minutes move on while the person is away, every CACHE_TICK_MS, until the drawings' time `shown`
@@ -402,7 +439,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
   const done = list.filter(a => !isLive(a)).reverse()
-  const summary = `≈${fmtUsd(m.costUsd)} · saved ${fmtPriced(s.usd)} · main ${mainPct}%`
+  const summary = `${approx(fmtUsd(m.costUsd))} · saved ${fmtPriced(s.usd)} · main ${mainPct}%`
   const collapse = (
     <Button key="collapse" plain label={u.isCompact ? 'Expand' : 'Collapse'} onPress={() => update($, ui, v => ({ ...v, isCompact: !v.isCompact }))} />
   )
@@ -428,10 +465,10 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     return (
       <Box flexDirection="column">
         <Svg source={heroSvg(w, m.costUsd, s.usd, c, at, mainPct)} alt={`${summary}${cacheText ? ` · ${cacheText}` : ''}`} width={w} height={HERO_H} />
-        {ping !== undefined && <Svg key="ping" source={noteSvg(w, ping)} alt={ping} width={w} height={NOTE_H} />}
-        {isPlan(c) && <Svg key="plan" source={noteSvg(w, PLAN_NOTE)} alt={PLAN_NOTE} width={w} height={NOTE_H} />}
+        {ping !== undefined && <Svg key="ping" {...noteOf(w, ping)} alt={ping} width={w} />}
+        {isPlan(c) && <Svg key="plan" {...noteOf(w, PLAN_NOTE)} alt={PLAN_NOTE} width={w} />}
         {collapse}
-        {list.length === 0 && <Svg key="empty" source={emptySvg(w)} alt="No subagents yet. They show up here as they start." width={w} height={EMPTY_H} />}
+        {list.length === 0 && <Svg key="empty" {...emptyOf(w)} alt="No subagents yet. They show up here as they start." width={w} />}
         {running.length > 0 && section('WORKING', running.length)}
         {running.map(row)}
         {guarded.length > 0 && section('STOPPING · GUARD', guarded.length)}
@@ -455,7 +492,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Text wrap="truncate-end">
         {'  '}
         <Text color={isGuarded(a) ? WARN : COLOR[a.tier]}>{textBar(ctxOf(a), barW)}</Text>
-        <Text dimColor>{` ctx ${ctxOf(a)}% · ${tokOf(a)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`}</Text>
+        <Text dimColor>{` ctx ${ctxOf(a)}% · ${tokOf(a)} · ${approx(fmtCost(a))} · ${fmtTime(elapsed(a, at))}`}</Text>
       </Text>
     </Box>
   )
@@ -535,7 +572,7 @@ export async function renderBand(
         {live.length ? <Text bold>{`${live.length - guarded} working`}</Text> : <Text dimColor>pennycrab</Text>}
         {guarded > 0 && <Text color="warning">{`· ${guarded} stopped by the guard`}</Text>}
         <Box flexGrow={1} />
-        {live.length > 0 && <Text dimColor>{`spent ≈${fmtUsd(m.costUsd)}`}</Text>}
+        {live.length > 0 && <Text dimColor>{`spent ${approx(fmtUsd(m.costUsd))}`}</Text>}
         <Text bold={s.usd > 0} color={s.usd > 0 ? 'success' : s.usd < 0 ? 'error' : undefined} dimColor={s.usd === 0}>
           {live.length || s.usd === 0 ? saved : `${saved} this session`}
         </Text>

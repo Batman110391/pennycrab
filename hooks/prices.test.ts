@@ -162,7 +162,7 @@ test('older prices are fetched again; with the page down or changed, the kept on
 
 test('with no prices kept and the page down, costs read as unknown rather than made up', async ($: Engine, on) => {
   const { clock } = world(on, undefined, 'down')
-  expect(await rowCost($, clock)).toContain('≈?')
+  expect(await rowCost($, clock)).toContain(' · ? · ')
 })
 
 test('with the page down at the start, it is asked again ten minutes later, and prices from then on', { timeoutMs: 30_000 }, async ($: Engine, on) => {
@@ -178,7 +178,7 @@ test('with the page down at the start, it is asked again ten minutes later, and 
 
 test('a subagent on a model the page does not list reads ?, not $0.00', async ($: Engine, on) => {
   const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down')
-  expect(await rowCost($, clock, 'my-gateway-model')).toContain('≈?')
+  expect(await rowCost($, clock, 'my-gateway-model')).toContain(' · ? · ')
 })
 
 test('an Explore of a Fable session would run on Opus without pennycrab: its savings are counted against Opus', async ($: Engine, on) => {

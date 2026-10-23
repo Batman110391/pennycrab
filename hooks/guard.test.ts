@@ -193,6 +193,11 @@ test('past its forecast a subagent is nudged once; past twice it, handed over wi
   await step($, 1)
   const tool = await $.tool.call(read)
   const why = (await paneTexts($)).filter(t => /over forecast/.test(t)).length
+  // On a narrow desktop pane the reason's chip still shows, whatever else gives way.
+  const desk = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', component: 'Pane', requestId: 'pennycrab', props: { title: 'Pennycrab', isFocused: false, bodyColumns: 38, placement: 'dock' } as never })
+  const chip = (await desk.findAll({ type: 'Svg' })).some(e => String((e as { props?: { source?: unknown } }).props?.source).includes('⚑ over forecast'))
+  await desk.unmount()
+  expect(chip).toBe(true)
   expect(notesOf(first)).toContain('usually finish within 400K')
   expect(notesOf(second)).toBe('')
   expect(tool.deny).toContain('Stopped by pennycrab: it used 2.0M tokens, past twice its forecast of 600K')
