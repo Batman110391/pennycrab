@@ -97,12 +97,14 @@ Never a model above yours. Left alone: a subagent type you defined, an explicit 
 
 With `delegate` on and the router on `auto` or `explore`, Claude's instructions gain a short rule (a few hundred tokens, read from the cache after the first request):
 
-- Explore runs on Haiku: a wide search (where something is done, how a flow runs, what uses a symbol) goes there, with a short report and file:line references that Claude checks before acting on them.
+- Explore runs on Haiku: when an answer needs more than 2 files Claude has not read yet (where something is done, how a flow runs, what uses a symbol), one Explore goes first, with a short report and file:line references that Claude checks before acting on them.
 - A known file, a narrow lookup or a code change stays with your model.
 
 On the Pro plan Claude Code tells Claude not to spawn subagents unless you ask, because a subagent re-reads at your model's price. That holds for subagents that write code, so pennycrab keeps the line for them and lifts it for Explore alone.
 
 Measured on a Pro account (five-hour limit, read before and after each load): 101K new tokens read by Opus moved the limit 3 points; 283K read by Haiku moved it 0. The limit follows price, not tokens.
+
+Measured live on Opus, the same question about this repository asked 3 times: Claude sent one Explore on Haiku each time, and each answer cost about $0.25, against $0.49 when Claude read the files itself.
 
 The rule is left out while the router does not move Explore to Haiku: `prudent`, `off`, a session already on Haiku, or a setting that keeps the router out.
 

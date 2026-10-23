@@ -9,11 +9,11 @@ export const delegateOf = (o: unknown) => o !== 'off'
 
 export const RULE = `# Subagents under pennycrab
 
-pennycrab runs Explore subagents on Haiku at low effort. On the user's plan limit Haiku weighs a small fraction of your own reading of the same text (about 1/40 at list price), and what Explore reads never enters your context.
+pennycrab runs Explore subagents on Haiku at low effort. On the user's plan limit Haiku weighs about 1/40 of your own reading of the same text, and what Explore reads never enters your context: here, reading files yourself is the expensive path.
 
-Hand a question to Explore when answering it means finding or reading many files: where something is done, how a flow runs across modules, what uses a symbol. Ask for a short report with file:line references, and check the claims your next step depends on before acting on them: Haiku is fast and less careful.
+The rule: when answering needs more than 2 files you have not read yet, send one Explore subagent first instead of reading them yourself. That covers where something is done, how a flow runs across modules, what uses a symbol. Ask it for a short report with file:line references, then open only the lines your answer or next edit depends on: Haiku is fast and less careful.
 
-Do it yourself when the file is known, the lookup is narrow (one search, one or two files), or the work changes code.`
+Do it yourself when one or two files answer it, when a single search answers it, or when the work changes code.`
 
 // The engine's line for the Pro plan. Its reason, a spawn re-deriving context at your price, does not hold for an
 // Explore that pennycrab moves to Haiku, so it keeps it for code alone.
