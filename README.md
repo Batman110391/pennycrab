@@ -143,7 +143,7 @@ Nothing of it leaves your machine.
 - **The forecast does not see how big a task is.** An Explore over a monorepo and one over a single file share a history. That is why it nudges first and hands over only at twice the forecast.
 - **The hand-back pennycrab makes for a subagent that ignores the refusals has not been seen live.** In the live tests, every subagent handed back by itself once refused.
 - **The first 10 runs of each kind have no forecast.** Until then only the loop check and the spend cap, if set, hand a subagent back.
-- **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. How a subagent that is running at that moment carries on has not been checked live.
+- **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. A subagent that is running at that moment carries on, and its row keeps counting its tokens (checked live).
 - **Settings has no menus on mobile**, where the elements pennycrab draws have no menu. Change the options from a computer.
 - **A narrow terminal** (around 40 columns) has not been tuned.
 
