@@ -1,8 +1,8 @@
 # pennycrab: stato e piano
 
-Aggiornato il 22 ottobre 2026 · versione 0.3.1 · Claude Code 2.1.308 · branch `main`.
+Aggiornato il 23 ottobre 2026 · versione 0.4.0 · Claude Code 2.1.302 · branch `main`.
 
-Questo file è scritto per la **sessione locale** che riprende il lavoro sul PC di Simone, in Claude Desktop. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **Il prossimo lavoro è la UI**: renderla perfetta e curata per chi la usa ogni giorno. La sezione 2 è il brief completo; le sezioni 1 e 4 servono come contesto.
+Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **La UI della 0.4.0 è stata rifatta e approvata da Simone in Desktop** (sezione 2). Restano pochi punti aperti (2.5) e l'icona. Le sezioni 3 e 4 servono come contesto.
 
 ## 1. Dove siamo
 
@@ -10,102 +10,94 @@ Questo file è scritto per la **sessione locale** che riprende il lavoro sul PC 
 | --- | --- | --- |
 | Router (`hooks/router.ts`) | `auto`: Explore su Haiku con effort basso da qualsiasi modello superiore; general-purpose su Sonnet da Opus o Fable. `prudent`: entrambi su Sonnet. `off` | finito, misurato |
 | Guardiano (`hooks/guard.ts`) | oltre il budget (2 $ di default) rifiuta gli strumenti del sub-agente con l'istruzione di consegnare; se insiste, dopo 2 richieste risponde la mod e il turno si chiude | finito, misurato |
-| Cache calda (`hooks/cache.ts`) | `auto`: un ping 45 s prima che la cache scada, finché i ping di un'assenza costano al massimo un quarto della riscrittura che evitano, fino a 8 ore. Si adatta da sola: un ping all'ora con l'abbonamento (cache da 1 ora), pochi ping a consumo (cache da 5 minuti). Un ping rifiutato dall'API si riprova dopo 15 s | finito, misurato con entrambe le cache |
+| Cache calda (`hooks/cache.ts`) | `auto`: un ping 45 s prima che la cache scada, finché i ping di un'assenza costano al massimo un quarto della riscrittura che evitano, fino a 8 ore. Si adatta da sola: un ping all'ora con l'abbonamento (cache da 1 ora), pochi ping a consumo (cache da 5 minuti). Un ping rifiutato dall'API si riprova dopo 15 s. `promptCacheTtl` si legge dall'oggetto intero delle impostazioni, perché una lettura `{ key }` può rispondere con l'oggetto | finito, misurato con entrambe le cache |
 | Prezzi (`hooks/prices.ts`) | letti una volta al giorno dalla pagina ufficiale di Anthropic (ogni 10 minuti finché non la raggiunge), salvati tra le sessioni; nessun prezzo nel codice | finito, verificato dal vivo |
 | Configurazione automatica (`hooks/setup.ts`) | al primo turno un toast dice cosa ha rilevato (abbonamento o consumo, cache, router, budget); si ripete solo se cambia | finito, testato |
 | Telemetria (`hooks/telemetry.ts`) | costo, contesto, tempo, strumento in uso per ogni sub-agente; da dove è stato spostato e con che effort, nella sua riga (sopravvive a un ricaricamento); un sub-agente ripreso tiene la sua spesa | finito |
-| **UI** (`hooks/ui.tsx`) | pannello, banda sopra il prompt, riga di stato, i 6 Clawd vestiti | **funziona, da rifinire: sezione 2** |
+| **UI** (`hooks/ui.tsx`) | pannello con il risparmio in grande e l'anello della cache, righe a card con chip, banda su una riga, riga di stato, i 6 Clawd vestiti | **rifatta nella 0.4.0, approvata in Desktop** |
 
-Verifiche: `claude plugin test .` (88 test), `claude plugin validate . --profile directory`, controllo dei tipi con `tsc` sui tipi del motore. Ogni regola importante ha un test che fallisce se la si rompe: provato rompendo una a una le 26 correzioni della revisione (sezione 4.4), più le 11 regole di prima.
+Verifiche: `claude plugin test .` (91 test) e `claude plugin validate .` (questa versione del motore non ha più `--profile`). I test lunghi della cache e dei prezzi simulano ore di attesa e hanno un tempo massimo di 30 s invece di 5. Ogni regola importante ha un test che fallisce se la si rompe; ogni pulsante ha un test che lo preme.
 
-## 2. Brief per la sessione locale: la UI
+## 2. La UI
 
 ### 2.1 Obiettivo
 
-Chi apre il pannello deve capire **in due secondi** tre cose: quanto ha risparmiato, chi sta lavorando adesso (e su quale modello), se la cache è calda. Il resto (costo per riga, contesto, tempo) è lì quando lo cerca. Lo stile deve essere curato e coerente su Desktop chiaro e scuro e sul terminale.
-
-A giudicare è Simone, guardando il pannello vero in Desktop: niente si considera finito prima che Simone l'abbia visto.
+Chi apre il pannello deve capire **in due secondi** tre cose: quanto ha risparmiato, chi sta lavorando adesso (e su quale modello), se la cache è calda. Il resto (costo per riga, contesto, tempo) è lì quando lo cerca. A giudicare è Simone, guardando il pannello vero in Desktop.
 
 ### 2.2 Come lavorare
 
-1. Aggiorna il clone locale: `git pull` su `main`, poi crea un branch per la UI.
-2. Carica la mod dalla cartella. In Desktop: `CLAUDE_CODE_PLUGIN_DIRS=~/progetti/pennycrab` e `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` nel blocco `env` di `~/.claude/settings.json`, poi riavvia l'app. In alternativa, la copia nella cartella delle mod della sessione, come prima. Ogni salvataggio ricarica la mod a fine turno.
-3. Per vedere ogni stato senza spendere: lancia un Explore in background per «running», abbassa il budget a 0,50 $ per «Guard», aspetta oltre la durata della cache per «Cache expired». Per gli stati difficili da provocare, aggiungi un test che monta il pannello (`$.ui.mount`) e controlla cosa disegna.
-4. **Tocca solo `hooks/ui.tsx`** (e i suoi test). Router, guardiano, cache, prezzi e telemetria sono finiti e misurati: se la UI ha bisogno di un dato nuovo, aggiungilo allo stato (`types/index.d.ts`) senza cambiare la logica.
-5. Prima di ogni push: `claude plugin test .` e `claude plugin validate .` verdi. Prima di cambiare il disegno, una bozza mostrata a Simone; dopo, la prova dal vivo.
+1. Carica la mod dalla cartella: `CLAUDE_CODE_PLUGIN_DIRS=/home/simone/progetti/pennycrab` e `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` nel blocco `env` di `~/.claude/settings.json`, poi riavvia Desktop. Ogni salvataggio ricarica la mod a fine turno. A lavoro finito togli le due variabili e installa dal marketplace.
+2. Per gli stati costosi (guardiano, cache scaduta) monta il pannello in un test e fanne un'anteprima: in una copia della mod con il solo test di anteprima, `console.log` dei sorgenti `Svg`, poi una pagina HTML con ogni `Svg` come `<img>` (così gli stili di uno non toccano gli altri), una volta con le regole scure e una senza.
+3. Tocca solo `hooks/ui.tsx` e i suoi test; un dato nuovo va nello stato (`types/index.d.ts`), senza cambiare la logica.
+4. Prima di ogni commit: `claude plugin test .` e `claude plugin validate .` verdi. Prima di cambiare il disegno, una bozza mostrata a Simone; dopo, la prova dal vivo.
 
-### 2.3 Cosa c'è oggi
+### 2.3 Cosa c'è oggi (0.4.0)
 
 | Superficie | Cosa disegna | Dove nel codice |
 | --- | --- | --- |
-| Pannello, Desktop | sfondo a puntini (pezzi alti al massimo 4096 px), 3 schede in alto (Cost, Saved, Main context), pulsante Collapse, riga della cache, sezioni Running · Guard · Finished, una riga SVG da 66 px per sub-agente (granchio, titolo, modello e da dove è stato spostato, strumento, contesto, costo, tempo, barra del contesto, segno di stato) | `renderPane`, `headSvg`, `rowSvg`, `paper` |
+| Pannello, Desktop | in alto una card con «SAVED THIS SESSION» in grande, sotto «spent ≈$X · would have been $Y» e la barra del contesto principale; a destra l'anello della cache (calda: si svuota con i minuti al centro; in uso: tratteggiato, «Xm after turn»; scaduta: «—»). Sotto, una nota per i ping e una per l'abbonamento. Poi Collapse, le sezioni WORKING · STOPPING · GUARD · FINISHED con una linea, e una card SVG da 70 px per sub-agente: granchio, titolo, chip (modello colorato, «⚑ over budget», «low», «↓ from X», «▶ strumento», «✓ done»), costo e cifre a destra, barra del contesto | `renderPane`, `heroSvg`, `ringOf`, `noteSvg`, `sectionSvg`, `rowSvg`, `chip` |
+| Pannello vuoto, Desktop | il granchio con la moneta e tre righe su cosa fa la mod | `emptySvg` |
 | Pannello compatto, Desktop | una fila di granchi e i totali | `shelfSvg` |
-| Pannello, terminale | lo stesso in testo, con barre `█░` | `renderPane`, ramo terminale |
-| Banda sopra il prompt | fino a 5 granchi da 24 px, «N running · M handover», barra del contesto principale, «saved $X», pulsanti ×N e ✕ | `renderBand`, `bandSvg` |
+| Pannello, terminale | lo stesso in testo, con barre `█░` e la riga della cache | `renderPane`, ramo terminale, `cacheLine` |
+| Banda, Desktop | una card su una riga: fino a 5 granchi, «N working · M stopped by the guard», «spent ≈$X», «saved $Y»; sotto, un solo pulsante «Pennycrab ›» che apre o chiude il pannello | `renderBand`, `bandSvg` |
+| Banda, terminale | «N running · M handover», barra del contesto principale, «saved $X», pulsanti ×N e ✕ | `renderBand`, ramo terminale |
 | Riga di stato | `🦀S 21% 1m59s` per al massimo due sub-agenti, poi «🦀 saved $X» | `statusLine`, `tick` |
-| Toast | configurazione al primo turno, chiusura del pannello, guardiano scattato | `setup.ts`, `register.ts`, `guard.ts` |
 | Granchi | i 6 Clawd vestiti approvati: Haiku fattorino, Sonnet esploratore, Opus banchiere, Fable re, Pennycrab con la moneta (modello sconosciuto), Guardiano (fermato) | `COSTUMES`, `crab` |
 
-### 2.4 Cosa sappiamo già di Desktop
+Un sub-agente fermato dal guardiano sta in STOPPING · GUARD finché lavora; quando finisce passa in FINISHED, con il casco e il chip «⚑ over budget».
+
+### 2.4 Cosa sappiamo di Desktop
 
 Queste cose sono costate tentativi: non rifarli.
 
-- **Desktop mette gli elementi fratelli su righe separate**: per un layout orizzontale serve un solo `Svg` per riga.
+- **Niente contenuto posato in `position="absolute"` sopra un altro `Svg`**: Desktop disegna il pannello tutto bianco, senza errori nei log. Per questo lo sfondo a puntini della 0.3 non c'è più: lo spazio tra le parti lo danno le card e le sezioni.
+- **Desktop mette gli elementi fratelli su righe separate**: per un layout orizzontale serve un solo `Svg` per riga, e un pulsante va sempre su una riga sua (per questo la banda ne ha uno solo).
 - **Su Desktop `$.ui.invalidate` non arriva alla banda**: si ridisegna scrivendo un valore di stato che il disegno legge (l'atomo `now`, aggiornato ogni secondo mentre lavorano sub-agenti, ogni 15 s mentre la cache conta).
 - **La banda vuota del motore** (`{ type: 'engine' }`) non va messa dentro la nostra: Desktop scarta tutta la banda.
-- **Un `Svg` alto più di 4096 px** non viene accettato: lo sfondo va a pezzi.
+- **Un `Svg` alto più di 4096 px** non viene accettato.
 - **Il terminale elenca `Svg` ma non lo disegna**: si controlla sempre `e.surface`.
-- **Ogni `Svg` è un'immagine**: quando il suo sorgente cambia (il tempo di una riga, ogni secondo), Desktop la sostituisce e le animazioni CSS ripartono da zero.
-- **La banda non deve leggere `now` né `cache`**: un disegno si rifà quando cambia un valore che legge, e la banda si porta dietro quella di ogni altra mod. Oggi legge solo `agents`, `main`, `savings`, `ui` (c'è un test).
-- **Un pannello aperto senza che la persona lo chieda** va aperto solo dove si aggancia di lato (`e.viewport.isFullscreen`), non sullo schermo principale del terminale, dove finirebbe sopra il prompt. Sotto i 144 colonne resta in attesa, non disegnato (`$.ui.panes()`: `isPlaced: false`).
-- **La riga di stato di pennycrab compare sopra quella di Claude**: è voluto, non va spostata.
-- Le indicazioni di Simone: nessuna dipendenza da altre mod, si prende spunto da mod che funzionano (savvy-progress, session-band) ma il codice è nostro; i granchi restano Clawd chiaramente vestiti, perché Clawd è la mascotte di Anthropic.
+- **Ogni `Svg` è un'immagine**: quando il suo sorgente cambia, le animazioni CSS ripartono da zero. Per questo tutti i periodi sono di 1 s o 0,5 s.
+- **La banda non deve leggere `now` né `cache`** (c'è un test): la cache sta solo nel pannello.
+- **Un pannello aperto senza che la persona lo chieda** va aperto solo dove si aggancia di lato (`e.viewport.isFullscreen`). Sotto i 144 colonne resta in attesa (`isPlaced: false`).
+- **La riga di stato di pennycrab compare sopra quella di Claude**: è voluto.
+- **Colori**: verde solo per i risparmi, ambra solo per il guardiano, l'anello della cache è grigio. `good`, `bad`, `warn`, `ring` e `chip` sono classi in `STYLE` con la loro variante scura.
+- Le indicazioni di Simone: nessuna dipendenza da altre mod, il codice è nostro; i granchi restano Clawd chiaramente vestiti.
 
-### 2.5 Problemi da risolvere
+### 2.5 Punti aperti
 
-La revisione del codice del 22 ottobre (4 lenti: tempi e stato, API del motore, economia, UI e test; 46 segnalazioni, ognuna verificata da un secondo agente) ha trovato 40 problemi reali. Quelli di logica e di numeri sbagliati a schermo sono già corretti, con un test ciascuno (sezione 4.4). Restano questi, tutti di disegno, tutti in `hooks/ui.tsx`:
+Risolti nella 0.4.0: contrasto nel tema scuro, animazioni che scattavano, test che premono i pulsanti, guardiano finito in Finished, nota per l'abbonamento, «Cache in use» che ingannava (ora dice quanto dura dopo il turno), pannello vuoto e tutto attaccato, banda con la barra vuota e la parola «handover».
 
-1. **Contrasto nel tema scuro.** Il verde dei risparmi (`GOOD`, #3B6D11) sulla scheda scura (#2A2A28) ha un contrasto di 2,3:1, nella banda di 2,7:1; il rosso della croce (`BAD`, #A32D2D) di 2,0:1. Per un testo di quella misura serve almeno 4,5:1: il numero più importante del pannello è il meno leggibile al buio. Soluzione: GOOD, BAD e i colori dei modelli usati come testo (`<tspan fill>`) diventano classi in `STYLE` con la loro variante scura, per esempio `.good{fill:#3B6D11}` e, sotto `prefers-color-scheme: dark`, `.good{fill:#97C459}`.
-2. **Le animazioni ripartono ogni secondo** (vedi 2.4). Quelle con un periodo che divide 1 s ripartono pulite; il puntino che pulsa (1,2 s) e la moneta che gira (1,6 s) scattano. Soluzione: periodi di 1 s o 0,5 s, oppure il tempo che scorre fuori dall'`Svg` della riga.
-3. **Nessun test preme un pulsante**: ✕ e ×N della banda, Collapse/Expand, Finished. Prima di rifarli, un test ciascuno con `press()`: per esempio, ✕ nasconde la banda e il sub-agente successivo la riporta.
-4. **I sub-agenti fermati dal guardiano restano in «Guard» anche finiti**, disegnati come quelli ancora attivi, finché non ne finiscono altri 20. Da decidere con Simone: spostarli in Finished con il segno «⚑ over budget».
-5. **Dollari per un abbonato.** Con un abbonamento nulla si paga a token: Cost e Saved sono equivalenti a listino, che contano sui limiti delle 5 ore e settimanali. Oggi lo dice solo il README. Serve un dato nuovo nello stato (abbonato sì o no: `ttlOf` lo sa già dalle `rateLimits`, va tenuto separato da `ttlSource`, che le variabili possono cambiare) e una nota sottile nel pannello.
-6. **«Cache in use» durante un turno lungo.** Mentre un turno è aperto non parte nessun ping (è voluto), anche quando il turno aspetta un permesso da 20 minuti; intanto la riga dice «Cache in use» mentre la cache scade. Servono parole che non ingannino, senza cambiare la logica.
-7. **Icona.** `claude plugin validate` avvisa `ICON_MISSING`: serve un PNG quadrato da 512 a 2048 px in `.claude-plugin/icon.png`. Il catalogo la prende solo la prima volta che il plugin viene inviato: va fatta bene prima dell'invio.
+Restano:
 
-Già sistemati, da non rompere (ognuno ha un test): il pannello si apre da solo una volta per ondata anche quando più sub-agenti partono insieme, e non sullo schermo principale del terminale; `/pennycrab` mostra un pannello rimasto in attesa invece di chiuderlo; una perdita si scrive «−$0.02» e non in verde; `?` per un costo che non si conosce (una riga con un modello che la pagina non elenca, `isUnpriced`; i ping senza prezzi); la riga della cache finisce sempre su «Cache expired»; ×N e «N running» contano solo i sub-agenti al lavoro; le cifre della riga sono separate da « · » perché l'SVG compatta gli spazi; ogni testo passa da `esc()`.
+1. **Icona.** `claude plugin validate` avvisa `ICON_MISSING`: serve un PNG quadrato da 512 a 2048 px in `.claude-plugin/icon.png`, fatto bene prima dell'invio al catalogo, che la prende solo la prima volta.
+2. **Nota sull'abbonamento quando la cache è impostata a mano.** La nota si mostra quando `ttlSource` è `plan` o `plan-over`; se una variabile o `promptCacheTtl` sceglie la durata, l'account non si vede e la nota manca (scorciatoia segnata nel codice). Se serve, un campo nuovo nello stato.
+3. **Il `?` di un costo sconosciuto** non ha ancora la spiegazione al passaggio del mouse.
+4. **Parole dell'anello diverse per abbonamento e consumo** («ping orari, fino a 8 h»): oggi sono le stesse.
+5. **Terminale stretto** (40 colonne): non riguardato in questo giro.
 
-### 2.6 Direzione di design
+### 2.6 Criteri di accettazione (0.4.0)
 
-- **Gerarchia**: in alto un solo numero grande, il risparmio della sessione, con sotto il costo; il contesto principale come barra sottile. Le schede tutte uguali oggi danno lo stesso peso a tre cose che non pesano uguale.
-- **Cache visibile**: la riga di testo diventa un piccolo elemento grafico (stato caldo, in uso o scaduto; tempo residuo; numero e costo dei ping), con le parole giuste per l'abbonamento («ping orari, fino a 8 h») e per il consumo.
-- **Abbonamento**: dove si mostrano dollari a un abbonato, dire che sono equivalenti a listino e che contano sui limiti (una nota sottile, non un'etichetta su ogni numero).
-- **Righe**: modello e granchio sono l'informazione principale; «↓ from Opus» e «low» come chip leggeri; il costo `?` (prezzi mai scaricati) spiegato con un hover.
-- **Colori**: un colore per modello, uguale in pannello, banda e riga di stato; verde solo per i risparmi, ambra solo per il guardiano; tutto leggibile in chiaro e in scuro (oggi i colori dei modelli sono fissi e il tema scuro passa solo per alcune classi CSS).
-- **Movimento**: solo i granchi al lavoro camminano; nessuna animazione se il sistema chiede movimento ridotto (già così: va mantenuto).
-- **Larghezze**: il pannello da 240 a 900 px, la banda fino a 1600 px; niente testo tagliato senza `…`, niente sovrapposizioni.
-
-### 2.7 Criteri di accettazione
-
-- [ ] Pannello vuoto: dice cosa farà la mod, non solo «No subagents yet».
-- [ ] Un sub-agente al lavoro: granchio che cammina, modello, strumento in uso, tempo che scorre.
-- [ ] Tre sub-agenti insieme, uno fermato dal guardiano: sezioni chiare, il Guardiano con «⚑ over budget».
-- [ ] Cache: calda (con il tempo residuo), in uso, scaduta, con ping; parole diverse per abbonamento e consumo.
-- [ ] Prezzi mai scaricati, o modello che la pagina non elenca: `?` spiegato.
-- [ ] Tema scuro: ogni testo almeno 4,5:1 (punto 1 della 2.5).
-- [ ] Animazioni che non scattano quando la riga si aggiorna (punto 2).
-- [ ] Ogni pulsante coperto da un test che lo preme (punto 3).
-- [ ] Banda: leggibile a 24 px, i dettagli dei granchi riconoscibili o semplificati.
-- [ ] Riga di stato: lettera del modello corretta, `?` per i modelli sconosciuti.
-- [ ] Tema chiaro e scuro su Desktop; terminale stretto (40 colonne) e largo.
-- [ ] Movimento ridotto rispettato.
-- [ ] Test e validazione verdi; Simone ha visto e approvato ogni stato.
+- [x] Pannello vuoto: dice cosa farà la mod.
+- [x] Un sub-agente al lavoro: granchio che cammina, modello, strumento in uso, tempo che scorre.
+- [x] Tre sub-agenti, uno fermato dal guardiano: sezioni chiare, il Guardiano con «⚑ over budget» (visto da un'anteprima montata in un test).
+- [x] Cache: calda con il tempo residuo, in uso, scaduta, con ping.
+- [ ] Cache: parole diverse per abbonamento e consumo (2.5, punto 4).
+- [ ] `?` spiegato (2.5, punto 3).
+- [x] Tema scuro: verde e rosso con la loro variante chiara.
+- [x] Animazioni con periodi di 1 s o 0,5 s.
+- [x] Ogni pulsante coperto da un test che lo preme.
+- [x] Banda: una riga, granchi riconoscibili, un pulsante.
+- [x] Riga di stato: lettera del modello corretta, `?` per i modelli sconosciuti.
+- [x] Tema chiaro e scuro su Desktop.
+- [ ] Terminale stretto (2.5, punto 5).
+- [x] Movimento ridotto rispettato.
+- [x] Test e validazione verdi; Simone ha visto e approvato pannello, righe, banda e Finished.
 
 ## 3. Altri passi, non UI
 
 1. Installazione pulita dal marketplace: `/plugin install pennycrab --marketplace Batman110391/pennycrab` (in Desktop: **+** → Plugins → Add marketplace → Add plugin), dopo aver tolto `CLAUDE_CODE_PLUGIN_DIRS`.
 2. Un controllo automatico su GitHub che a ogni push lanci test e validazione.
-3. Un'icona disegnata da zero (non Clawd) per il catalogo dei plugin: punto 7 della 2.5.
+3. Un'icona disegnata da zero (non Clawd) per il catalogo dei plugin: punto 1 della 2.5.
 4. Da valutare: le tariffe aziendali `modelPricing`, il sovrapprezzo 1,1× per l'inferenza solo negli USA, i ping durante i comandi molto lunghi.
 
 ## 4. Misure e scoperte
@@ -171,6 +163,6 @@ Corretto, ogni voce con il suo test:
 | Sub-agenti | un Explore sotto Fable contava il risparmio rispetto a Fable, ma senza pennycrab girerebbe su Opus | rispetto a Opus |
 | Sub-agenti | Mythos non veniva instradato; le righe dei teammate potevano sparire | Mythos come Fable; i teammate restano |
 | Prezzi | una sessione partita senza rete restava senza prezzi (e senza guardiano) fino alla fine | riprova ogni 10 minuti |
-| UI | `/pennycrab`, ondate parallele, schermo principale del terminale, perdite in verde, `?`, riga della cache bloccata, ×N, banda ridisegnata ogni secondo, spazi compattati, `esc()` senza test | vedi la fine della 2.5 |
+| UI | `/pennycrab`, ondate parallele, schermo principale del terminale, perdite in verde, `?`, riga della cache bloccata, ×N, banda ridisegnata ogni secondo, spazi compattati, `esc()` senza test | test in `ui.test.tsx`, `cache.test.ts`, `prices.test.ts` |
 
 Segnalazioni scartate dalla verifica (6): comportamenti voluti e documentati, o casi che richiedono tre coincidenze e non producono numeri sbagliati.
