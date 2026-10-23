@@ -1,6 +1,6 @@
 {
   "name": "pennycrab",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
   "author": {
     "name": "Batman110391"
@@ -68,6 +68,16 @@
         "off"
       ],
       "default": "auto"
+    },
+    "units": {
+      "type": "string",
+      "title": "Show spend and savings in",
+      "description": "usd: dollars, as priced. tokens: in tokens of your main model at its input price (≈ Opus tokens on Opus), the measure a subscription's quota is likely weighed by.",
+      "options": [
+        "usd",
+        "tokens"
+      ],
+      "default": "usd"
     },
     "band": {
       "type": "string",

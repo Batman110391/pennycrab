@@ -77,6 +77,7 @@ Set them from **⚙ Settings**, in the config menu, or with `/plugin configure p
 | `forecast` | `on`, `nudge`, `off` | `on` | `on`: a nudge past the forecast, a handover past twice it. `nudge`: the nudge only. See [Forecast](#forecast). |
 | `budget` | `1`, `2`, `5`, `10`, `20`, `50` (USD), `off` | `off` | A spend cap per subagent, on top of the forecast. |
 | `keepWarm` | `auto`, `30m`, `1h`, `2h`, `4h`, `8h`, `off` | `auto` | How long the cache is kept warm after your last message. See [Keep-warm](#keep-warm). |
+| `units` | `usd`, `tokens` | `usd` | Spend and savings in dollars, or in tokens of your main model at its input price (≈ Opus tokens on Opus). See [How the numbers are counted](#how-the-numbers-are-counted). |
 | `band` | `always`, `working`, `off` | `always` | When the band shows: always, only while subagents run, or never. |
 | `statusLine` | `on`, `off` | `on` | The crabs at work on the status line. |
 | `autoOpen` | `on`, `off` | `on` | Whether the pane opens by itself when a wave of subagents starts. |
@@ -119,6 +120,7 @@ The spend cap hands a subagent over the same way.
   - for the cache, the cost of rewriting what your next message read from the cache, counted only when the cache would have expired without the pings, minus what every ping cost. Pings for a session you never come back to are a loss, and the pane shows it as one (−$0.02).
 - **The first ping after a turn** can write a part of the conversation to the cache again, once: a ping sends the conversation as the transcript holds it, which can differ a little from how the turn's own request went out. `auto` counts that cost.
 - **On a subscription** nothing is billed per token: the dollars are list-price equivalents of what counts against your plan's 5-hour and weekly limits.
+- **In tokens** (`units: tokens`), every dollar figure is divided by your main model's price per input token: on Opus 5.5, $1 is 250K Opus tokens. A cache read then weighs a twentieth of a token and an output token five, as their prices do. It is the same count as the dollars, in the unit a subscription's quota is spent in.
 - **The cache's lifetime** is read the way Claude Code decides it: `FORCE_PROMPT_CACHING_5M`, then `CLAUDE_CODE_PROMPT_CACHE_TTL`, then the `promptCacheTtl` setting, then `ENABLE_PROMPT_CACHING_1H`, then your account. That is 1 hour on a Claude subscription within its limits, and 5 minutes on an API key, a cloud provider, or a subscription past its limits.
 
 ## What stays on your machine
@@ -144,6 +146,7 @@ Nothing of it leaves your machine.
 - **The hand-back pennycrab makes for a subagent that ignores the refusals has not been seen live.** In the live tests, every subagent handed back by itself once refused.
 - **The first 10 runs of each kind have no forecast.** Until then only the loop check and the spend cap, if set, hand a subagent back.
 - **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. A subagent that is running at that moment carries on, and its row keeps counting its tokens (checked live).
+- **Tokens assume the quota weighs models by price.** Anthropic does not document how a subscription's 5-hour and weekly limits weigh one model against another; the token figures read ≈ for that reason.
 - **Settings has no menus on mobile**, where the elements pennycrab draws have no menu. Change the options from a computer.
 - **A narrow terminal** (around 40 columns) has not been tuned.
 

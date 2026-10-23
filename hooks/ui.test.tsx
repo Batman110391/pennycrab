@@ -384,6 +384,16 @@ function settings(on: On) {
   return sets
 }
 
+test('settings, on a host that lists no plugin options: says where to change them, no empty pane', async ($: Engine, on) => {
+  on('config.list', async () => ({ value: [ROWS.at(-1)!] }) as never)
+  await session($, on)
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...SETTINGS_PANE })
+  const found = { selects: (await ui.findAll({ type: 'Select' })).length, buttons: (await ui.findAll({ type: 'Button' })).length, text: (await texts(ui)).join(' ') }
+  await ui.unmount()
+  expect(found.selects + found.buttons).toBe(0)
+  expect(found.text).toContain('/pennycrab settings')
+})
+
 test('settings: one Select per option of ours, a locked one as text; a pick sets it', async ($: Engine, on) => {
   const sets = settings(on)
   await session($, on)

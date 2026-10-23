@@ -10,7 +10,7 @@ import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
 import { announceSetup } from './setup'
 import { addAgent, finish, recordStep, setTool } from './telemetry'
-import { displayOf, onSpawnUi, openSettings, renderBand, renderPane, renderSettings, tick, togglePane } from './ui'
+import { displayOf, onSpawnUi, openSettings, renderBand, renderPane, renderSettings, tick, togglePane, unitsOf, useUnits } from './ui'
 
 // One hook per event (the engine takes no second unmatched one); each module adds its part here.
 // Every hook fails open: on an error the engine's own behaviour goes on.
@@ -22,6 +22,7 @@ export const register: Register = (on, options) => {
   let project = ''
   const warm = keepWarmOf(options.keepWarm as KeepWarm | undefined)
   const display = displayOf(options)
+  useUnits(unitsOf(options.units))
 
   on('session.start', async ($, e, next) => {
     project = e.cwd

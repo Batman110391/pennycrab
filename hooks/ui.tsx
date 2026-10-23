@@ -4,7 +4,7 @@ import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 import type { Agent, Cache, Main, Tier } from '../types'
 import { keepWarmOf } from './cache'
 import type { KeepWarm, WarmPolicy } from './cache'
-import { priceBook, tierOf } from './prices'
+import { priceBook, priceKeyOf, tierOf } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
 export const PANE = 'pennycrab'
@@ -30,11 +30,35 @@ const GLYPH: Record<Agent['status'], string> = { running: '●', tool: '●', ha
 
 // A loss reads with its sign first: −$0.02.
 export const fmtUsd = (n: number): string => (n < 0 ? `−${fmtUsd(-n)}` : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+// The unit spend and savings show in: dollars, or tokens of the main model at its input price. A view of the
+// same dollar figures, set once per load from the option and the main model as last read.
+export type Units = '$' | 'tokens'
+export const unitsOf = (o: unknown): Units => (o === 'tokens' ? 'tokens' : '$')
+let units: Units = '$'
+let mainModel = ''
+export const useUnits = (u: Units) => void (units = u)
+const seeMain = (m: Main) => void (mainModel = m.model)
+const inputRate = () => {
+  const b = priceBook()
+  const key = b && mainModel ? priceKeyOf(mainModel, b.models) : undefined
+  return key ? b!.models[key]!.input / 1e6 : undefined
+}
+const fmtMoney = (n: number): string => {
+  if (units === '$') return fmtUsd(n)
+  const rate = inputRate()
+  if (rate === undefined) return '?'
+  const t = Math.round(n / rate)
+  return t < 0 ? `−${fmtTokens(-t)}` : fmtTokens(t)
+}
+// What the token figures count, for a label: "Opus tokens".
+const unitName = () => `${NAME[tierOf(mainModel)]} tokens`
+// On a line that names no unit: " tok" after a token figure.
+const tokSuffix = () => (units === 'tokens' ? ' tok' : '')
 // A figure priced from the pricing page; '?' while no prices were ever fetched. The session's own cost comes
-// from the engine and needs none.
-const fmtPriced = (n: number) => (priceBook() ? fmtUsd(n) : '?')
+// from the engine and needs none, in dollars.
+const fmtPriced = (n: number) => (priceBook() ? fmtMoney(n) : '?')
 // A row's cost; '?' once a request of it ran on a model the page does not list.
-const fmtCost = (a: Agent) => (a.isUnpriced ? '?' : fmtUsd(a.costUsd))
+const fmtCost = (a: Agent) => (a.isUnpriced ? '?' : fmtMoney(a.costUsd))
 // What a '?' means, shown as its tooltip on Desktop.
 const NO_PRICES = 'No prices yet: pennycrab reads them from the Anthropic pricing page once it is reached.'
 const UNLISTED = 'Unknown: a request of it ran on a model the pricing page does not list.'
@@ -268,8 +292,8 @@ function ringOf(c: Cache, at: number, cx: number, cy: number, warm: WarmPolicy |
 // and the main thread's context.
 const HERO_H = 118
 function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, mainPct: number, warm: WarmPolicy | undefined) {
-  const spent = approx(fmtUsd(cost))
-  const would = priceBook() ? fmtUsd(cost + saved) : '?'
+  const spent = approx(fmtMoney(cost))
+  const would = priceBook() ? fmtMoney(cost + saved) : '?'
   const hasRing = c.ttlMs !== null && c.lastRequestAt !== null
   const room = w - (hasRing ? 124 : 32)
   const bx = 122
@@ -282,6 +306,7 @@ function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, m
       tipped(
         priceBook() ? undefined : NO_PRICES,
         label(16, 62, 34, saved > 0 ? 'good' : saved < 0 ? 'bad' : 'fg', fmtPriced(saved), B) +
+          (units === 'tokens' && priceBook() ? label(16 + widthOf(fmtPriced(saved), 34) + 8, 62, 12, 'dim', unitName(), SB) : '') +
           label(16, 82, 11, 'dim', clip(saved === 0 ? `spent ${spent}` : fitOf([`spent ${spent} · would have been ${would}`, `spent ${spent}, not ${would}`], 11, room), 11, room)),
       ) +
       label(16, 104, 10.5, 'dim', `Main context ${mainPct}%`) +
@@ -299,7 +324,7 @@ function noteOf(w: number, s: string) {
   return { source: svg(w, height, lines.map((l, i) => label(2, 13 + i * 14, 10.5, 'faint', l)).join('')), height }
 }
 const pingNote = (c: Cache) =>
-  c.pings ? `Kept warm while away: ${c.pings} ping${c.pings === 1 ? '' : 's'} ${approx(fmtPriced(c.pingUsd))}${c.savedUsd > 0 ? ` · saved ${fmtUsd(c.savedUsd)} of rewrites` : ''}` : undefined
+  c.pings ? `Kept warm while away: ${c.pings} ping${c.pings === 1 ? '' : 's'} ${approx(fmtPriced(c.pingUsd))}${c.savedUsd > 0 ? ` · saved ${fmtMoney(c.savedUsd)} of rewrites` : ''}` : undefined
 // shortcut: a TTL set by a variable or setting hides the account, so no note then; add a field if that matters.
 const isPlan = (c: Cache) => c.ttlSource === 'plan' || c.ttlSource === 'plan-over'
 const PLAN_NOTE = 'ⓘ Subscription: dollars are list-price equivalents, counted against your usage limits.'
@@ -400,7 +425,7 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
     32,
     shown.map((a, i) => crab(i * 36, 2, costumeOf(a), isLive(a), 2)).join('') +
       (rest ? label(shown.length * 36 + 4, 21, 12, 'dim', `+${rest}`) : '') +
-      label(w, 21, 12, 'dim', `${approx(fmtUsd(cost))} · saved ${fmtPriced(saved)}`, ' text-anchor="end"'),
+      label(w, 21, 12, 'dim', `${approx(fmtMoney(cost))} · saved ${fmtPriced(saved)}`, ' text-anchor="end"'),
   )
 }
 
@@ -452,6 +477,7 @@ async function view($: EngineInterface, warm: WarmPolicy | undefined) {
   const s = await read($, savings)
   const u = await read($, ui)
   const c = await read($, cache)
+  seeMain(m)
   const at = Math.max(await read($, now), ...list.map(a => a.startedAt), c.lastRequestAt ?? 0, 0)
   return { list, m, s, u, c, at, mainPct: pctOf(m), cacheText: cacheLine(c, at, warm) }
 }
@@ -465,7 +491,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>, dis
   const running = list.filter(a => isLive(a) && !isGuarded(a)).reverse()
   const guarded = list.filter(isGuarded).reverse()
   const done = list.filter(a => !isLive(a)).reverse()
-  const summary = `${approx(fmtUsd(m.costUsd))} · saved ${fmtPriced(s.usd)} · main ${mainPct}%`
+  const summary = `${approx(fmtMoney(m.costUsd))} · saved ${fmtPriced(s.usd)}${tokSuffix()} · main ${mainPct}%`
   const collapse = (
     <Button key="collapse" plain label={u.isCompact ? 'Expand' : 'Collapse'} onPress={() => update($, ui, v => ({ ...v, isCompact: !v.isCompact }))} />
   )
@@ -573,6 +599,7 @@ export async function renderBand(
   const list = await read($, agents)
   const m = await read($, main)
   const s = await read($, savings)
+  seeMain(m)
   const live = list.filter(isLive)
   if (display.band === 'off' || (display.band === 'working' && live.length === 0) || e.props.hasSurvey) return next(e)
   // The engine's own empty band ({ type: 'engine' }) must not end up inside ours: the desktop then drops the whole band.
@@ -582,7 +609,7 @@ export async function renderBand(
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
   const guarded = live.filter(isGuarded).length
-  const saved = s.usd > 0 ? `saved ${fmtPriced(s.usd)}` : s.usd < 0 ? `saved ${fmtUsd(s.usd)}` : 'nothing saved yet'
+  const saved = s.usd > 0 ? `saved ${fmtPriced(s.usd)}${tokSuffix()}` : s.usd < 0 ? `saved ${fmtMoney(s.usd)}${tokSuffix()}` : 'nothing saved yet'
   // The terminal also lists an Svg, which draws nothing there, so the surface is checked as well.
   const crabs =
     e.surface !== 'terminal' && 'Svg' in r ? (
@@ -599,7 +626,7 @@ export async function renderBand(
         {live.length ? <Text bold>{`${live.length - guarded} working`}</Text> : <Text dimColor>pennycrab</Text>}
         {guarded > 0 && <Text color="warning">{`· ${guarded} stopped by the guard`}</Text>}
         <Box flexGrow={1} />
-        {live.length > 0 && <Text dimColor>{`spent ${approx(fmtUsd(m.costUsd))}`}</Text>}
+        {live.length > 0 && <Text dimColor>{`spent ${approx(fmtMoney(m.costUsd))}`}</Text>}
         <Text bold={s.usd > 0} color={s.usd > 0 ? 'success' : s.usd < 0 ? 'error' : undefined} dimColor={s.usd === 0}>
           {live.length || s.usd === 0 ? saved : `${saved} this session`}
         </Text>
@@ -662,6 +689,17 @@ const FIELDS: Field[] = [
           : `A short ping before the cache lapses, for ${v} after your last message.`,
   },
   {
+    field: 'units',
+    section: 'DISPLAY',
+    name: 'Show spend and savings in',
+    def: 'usd',
+    label: v => (v === 'usd' ? '$' : v),
+    hint: v =>
+      v === 'tokens'
+        ? 'Tokens of your main model at its input price: what a subscription spends, if its quota weighs models by price as it likely does. An estimate, so it reads ≈.'
+        : 'Dollars, as priced from the Anthropic pricing page.',
+  },
+  {
     field: 'band',
     section: 'DISPLAY',
     name: 'Bar above the prompt',
@@ -684,12 +722,16 @@ async function setOption($: EngineInterface, key: string, value: string) {
   if (deny) $.ui.toast(`Pennycrab could not change it: ${deny}`)
 }
 
+const NO_OPTIONS =
+  "This app does not hand pennycrab its options, so they cannot be changed here. In a terminal, run claude and /pennycrab settings, or /plugin configure pennycrab."
 export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>) {
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
   const rows = new Map((await $.config.list()).flatMap(row => (fieldOf(row.key) ? [[fieldOf(row.key)!, row] as const] : [])))
   const shown = FIELDS.filter(f => rows.has(f.field))
   const sections = [...new Set(shown.map(f => f.section))]
+  // Some hosts list no plugin's options (the Desktop app's Code tab, checked live on 2.1.308): say where they are.
+  if (shown.length === 0) return <Text wrap="wrap">{NO_OPTIONS}</Text>
   const reset = async () => {
     for (const f of shown) if (!rows.get(f.field)!.isLocked && String(rows.get(f.field)!.value) !== f.def) await setOption($, rows.get(f.field)!.key, f.def)
   }
@@ -738,7 +780,7 @@ export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>)
 // Up to two running subagents, then a count; the savings once nothing runs.
 function statusLine(list: Agent[], saved: number, at: number) {
   const live = list.filter(isLive)
-  if (live.length === 0) return saved > 0 ? `🦀 saved ${fmtUsd(saved)}` : undefined
+  if (live.length === 0) return saved > 0 ? `🦀 saved ${fmtMoney(saved)}${tokSuffix()}` : undefined
   const shown = live.slice(-2).map(a => `🦀${LETTER[a.tier]} ${ctxOf(a)}% ${fmtTime(elapsed(a, at))}`)
   return [...shown, ...(live.length > 2 ? [`+${live.length - 2}`] : [])].join(' · ')
 }
@@ -751,6 +793,7 @@ export async function tick($: EngineInterface, display: Display) {
   const at = await $.clock.now()
   const isCounting = isCacheCounting(await read($, cache), await read($, now), at)
   if (list.some(isLive) || isCounting) await update($, now, () => at)
+  seeMain(await read($, main))
   const line = display.isStatusLine ? statusLine(list, (await read($, savings)).usd, at) : undefined
   if (line !== shownStatus) $.ui.status((shownStatus = line))
 }

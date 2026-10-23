@@ -211,3 +211,26 @@ test('Desktop: with no prices yet, the head says why it reads ?, on hover', asyn
   const tips = (await deskSvgs($)).filter(p => p.isInteractive).map(p => /<title>([^<]*)/.exec(p.source)?.[1])
   expect(tips).toContain('No prices yet: pennycrab reads them from the Anthropic pricing page once it is reached.')
 })
+
+// units "tokens": the same dollar figures, in tokens of the main model at its input price (Opus 5.5: $4 per M).
+async function mainStep($: Engine) {
+  const stream = $.turn.step({ turnId: 'm', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  for (;;) if ((await stream.next()).done) break
+}
+
+test('units "tokens": a $2.50 row reads ≈625K, in Opus tokens once Opus is the main model', { options: { units: 'tokens' } }, async ($: Engine, on) => {
+  const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down')
+  await start($, clock)
+  await mainStep($)
+  const row = (await pane($)).filter(t => /ctx \d+%/.test(t)).join(' ')
+  expect(row).toContain(' · ≈625K · ')
+  const svgs = await deskSvgs($)
+  expect(svgs[0]!.source).toContain('>Opus tokens<')
+})
+
+test('units "tokens" with no prices: ?, never a made-up figure', { options: { units: 'tokens' } }, async ($: Engine, on) => {
+  const { clock } = world(on, undefined, 'down')
+  await start($, clock)
+  await mainStep($)
+  expect((await pane($)).filter(t => /ctx \d+%/.test(t)).join(' ')).toContain(' · ? · ')
+})
