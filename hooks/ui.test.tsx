@@ -90,11 +90,11 @@ test('the band shows up once a subagent starts under a mounted band, prompt idle
   await $.session.start({ source: 'startup', cwd: '/repo', surface: 'desktop', isInteractive: true } as never)
   const idle = { ...BAND, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100 } as never }
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...idle })
-  const before = (await band.findAll({ type: 'Svg' })).length
+  const before = (await texts(band)).includes('1 working')
   await $.agent.spawn({ tool_use_id: 't', prompt: 'p', description: 'Long look', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
-  const after = (await band.findAll({ type: 'Svg' })).length
+  const after = (await texts(band)).includes('1 working')
   await band.unmount()
-  expect({ before, after }).toEqual({ before: 0, after: 1 })
+  expect({ before, after }).toEqual({ before: false, after: true })
 })
 
 test('the pane opens once per wave of subagents, not on every spawn', async ($: Engine, on) => {
@@ -244,18 +244,16 @@ test('/pennycrab shows a pane that was opened unasked and waits undrawn, rather 
   expect({ text: (r as { text?: string }).text, opened: sent.opened }).toEqual({ text: 'Pennycrab pane opened.', opened: 1 })
 })
 
-test('the band counts running subagents only: finished ones are not on its button', async ($: Engine, on) => {
+test('the band counts running subagents only', async ($: Engine, on) => {
   crew(on)
   await begin($, 'terminal')
   for (const d of ['One', 'Two', 'Three']) await spawnOne($, d)
   await end($, 'a1')
   await end($, 'a2')
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', ...BAND })
-  const texts = (await band.findAll({ type: 'Text' })).map(t => (t as { text?: string }).text ?? '')
-  const buttons = (await band.findAll({ type: 'Button' })).map(b => String((b as { props?: { label?: unknown } }).props?.label))
+  const shown = await texts(band)
   await band.unmount()
-  expect(texts).toContain('1 running')
-  expect(buttons).toContain('×1')
+  expect(shown).toContain('1 working')
 })
 
 test('the band is not drawn again each second: it shows nothing that moves with time', async ($: Engine, on) => {
@@ -284,6 +282,7 @@ test('a routed Explore\'s requests go out at low effort, read from its row', asy
   expect(sent.efforts).toEqual(['low'])
 })
 
+const texts = async (ui: { findAll: (q: object) => Promise<unknown[]> }) => (await ui.findAll({ type: 'Text' })).map(t => (t as { text?: string }).text ?? '')
 const labels = async (ui: { findAll: (q: object) => Promise<unknown[]> }) =>
   (await ui.findAll({ type: 'Button' })).map(b => String((b as { props?: { label?: unknown } }).props?.label))
 const svgCount = async (ui: { findAll: (q: object) => Promise<unknown[]> }) => (await ui.findAll({ type: 'Svg' })).length
@@ -308,30 +307,112 @@ test('desktop pane buttons: Collapse folds it to one shelf and Expand brings it 
   expect(back).toEqual(['Collapse', '▾ Hide'])
 })
 
-test('desktop band: its one button opens the pane', async ($: Engine, on) => {
+test('band buttons: Pane opens the pane, ⚙ Settings opens the settings', async ($: Engine, on) => {
   on('ui.panes', async () => ({ value: [] }) as never)
   const opens = await session($, on)
   const before = opens.n
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
   const buttons = await labels(band)
-  await band.press({ key: 'pennycrab-open' })
+  await band.press({ key: 'pennycrab-pane' })
+  await band.press({ key: 'pennycrab-settings' })
   await band.unmount()
-  expect({ buttons, opened: opens.n - before }).toEqual({ buttons: ['Pennycrab ›'], opened: 1 })
+  expect({ buttons, opened: opens.n - before }).toEqual({ buttons: ['Pane', '⚙ Settings'], opened: 2 })
 })
 
-test('terminal band buttons: ×N opens the pane, ✕ hides the band until the next subagent', async ($: Engine, on) => {
-  // Stands for the engine's own band, drawn once ours steps aside.
+// Stands for the engine's own band, drawn once ours steps aside.
+const engineBand = (on: On) =>
   on('ui.render', async ($, e) => {
     const { Box } = $.ui.resolve(e)
     return <Box />
   })
-  on('ui.panes', async () => ({ value: [] }) as never)
+
+test('band "working": no bar while no subagent runs', { options: { band: 'working' } }, async ($: Engine, on) => {
+  engineBand(on)
+  crew(on)
+  await begin($)
+  const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
+  const idle = await labels(band)
+  await spawnOne($, 'One')
+  const working = await labels(band)
+  await band.unmount()
+  expect({ idle, working }).toEqual({ idle: [], working: ['Pane', '⚙ Settings'] })
+})
+
+test('band "off" and status line "off": neither draws', { options: { band: 'off', statusLine: 'off' } }, async ($: Engine, on) => {
+  engineBand(on)
+  const lines: unknown[] = []
+  on('ui.status', async (_$, e) => {
+    lines.push(e.text)
+    return { value: undefined } as never
+  })
+  const { clock } = crew(on)
+  await begin($)
+  await spawnOne($, 'One')
+  await clock.advance(2000)
+  const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
+  const buttons = await labels(band)
+  await band.unmount()
+  expect({ buttons, lines: lines.filter(l => l !== undefined).length }).toEqual({ buttons: [], lines: 0 })
+})
+
+test('autoOpen "off": a wave of subagents does not open the pane', { options: { autoOpen: 'off' } }, async ($: Engine, on) => {
+  const { sent } = crew(on)
+  await begin($)
+  await spawnOne($, 'One')
+  expect(sent.opened).toBe(0)
+})
+
+// The rows /config lists for pennycrab, as installed from its marketplace; one is set by a policy.
+const ROWS = [
+  { key: 'pennycrab@pennycrab.router', value: 'auto', options: ['auto', 'explore', 'prudent', 'off'], isLocked: false },
+  { key: 'pennycrab@pennycrab.budget', value: '5', options: ['0.50', '1', '2', '5', 'off'], isLocked: true },
+  { key: 'pennycrab@pennycrab.keepWarm', value: '1h', options: ['auto', '30m', '1h', '2h', '4h', '8h', 'off'], isLocked: false },
+  { key: 'pennycrab@pennycrab.band', value: 'always', options: ['always', 'working', 'off'], isLocked: false },
+  { key: 'pennycrab@pennycrab.statusLine', value: 'on', options: ['on', 'off'], isLocked: false },
+  { key: 'pennycrab@pennycrab.autoOpen', value: 'off', options: ['on', 'off'], isLocked: false },
+  { key: 'other.router', value: 'x', options: ['x'], isLocked: false },
+].map(r => ({ ...r, label: r.key, kind: 'enum', provider: { plugin: 'pennycrab', tier: 'user' } }))
+const SETTINGS_PANE = { ...PANE, requestId: 'pennycrab-settings' } as const
+
+function settings(on: On) {
+  const sets: { key: string; value: unknown }[] = []
+  on('config.list', async () => ({ value: ROWS }) as never)
+  on('config.set', async (_$, e) => {
+    sets.push({ key: e.key, value: e.value })
+    return { value: e.value }
+  })
+  return sets
+}
+
+test('settings: one Select per option of ours, a locked one as text; a pick sets it', async ($: Engine, on) => {
+  const sets = settings(on)
+  await session($, on)
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...SETTINGS_PANE })
+  const selects = (await ui.findAll({ type: 'Select' })).map(e => (e as { props?: { key?: unknown } }).props?.key)
+  const shown = await texts(ui)
+  await ui.select({ key: 'pennycrab-router', value: 'explore' })
+  await ui.unmount()
+  expect(selects).toEqual(['pennycrab-router', 'pennycrab-keepWarm', 'pennycrab-band', 'pennycrab-statusLine', 'pennycrab-autoOpen'])
+  expect(shown).toContain('  🔒 $5 · set by your organization')
+  expect(shown).toContain('A short ping before the cache lapses, for 1h after your last message.')
+  expect(sets).toEqual([{ key: 'pennycrab@pennycrab.router', value: 'explore' }])
+})
+
+test('settings: Reset sets back what differs from the defaults, the locked row left alone', async ($: Engine, on) => {
+  const sets = settings(on)
+  await session($, on)
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...SETTINGS_PANE })
+  await ui.press({ key: 'pennycrab-reset' })
+  await ui.unmount()
+  expect(sets).toEqual([
+    { key: 'pennycrab@pennycrab.keepWarm', value: 'auto' },
+    { key: 'pennycrab@pennycrab.autoOpen', value: 'on' },
+  ])
+})
+
+test('/pennycrab settings opens the settings pane', async ($: Engine, on) => {
   const opens = await session($, on)
   const before = opens.n
-  const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'terminal', ...BAND })
-  await band.press({ key: 'pennycrab-crew' })
-  await band.press({ key: 'pennycrab-hide' })
-  const hidden = await labels(band)
-  await band.unmount()
-  expect({ opened: opens.n - before, hidden }).toEqual({ opened: 1, hidden: [] })
+  const r = await $.command.run({ command: 'pennycrab', args: 'settings' } as never)
+  expect({ text: (r as { text?: string }).text, opened: opens.n - before }).toEqual({ text: 'Pennycrab settings opened.', opened: 1 })
 })

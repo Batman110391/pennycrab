@@ -67,8 +67,6 @@ export type Cache = {
 export type Ui = {
   isCompact: boolean
   isDoneOpen: boolean
-  // Hidden from its ✕ until the next subagent starts.
-  isBandHidden: boolean
 }
 
 declare module 'claude-code' {

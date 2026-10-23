@@ -1,33 +1,91 @@
 {
   "name": "pennycrab",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
-  "author": { "name": "Batman110391" },
+  "author": {
+    "name": "Batman110391"
+  },
   "repository": "https://github.com/Batman110391/pennycrab",
   "license": "MIT",
-  "keywords": ["subagents", "cost", "prompt-cache", "router", "pane"],
+  "keywords": [
+    "subagents",
+    "cost",
+    "prompt-cache",
+    "router",
+    "pane"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "router": {
       "type": "string",
       "title": "Subagent router",
       "description": "auto: Explore, which only reads and searches, runs on Haiku at low effort, and general-purpose on Sonnet when your session runs on Opus or Fable. explore: Explore on Haiku as in auto, general-purpose keeps your model. prudent: both on Sonnet, from Opus or Fable only. off: subagents inherit your model. Never a model above yours.",
-      "options": ["auto", "explore", "prudent", "off"],
+      "options": [
+        "auto",
+        "explore",
+        "prudent",
+        "off"
+      ],
       "default": "auto"
     },
     "budget": {
       "type": "string",
       "title": "Subagent budget (USD)",
       "description": "The most one subagent may spend before the guard asks it to hand back what it found, then stops it if it keeps going. off: no guard.",
-      "options": ["0.50", "1", "2", "5", "off"],
+      "options": [
+        "0.50",
+        "1",
+        "2",
+        "5",
+        "off"
+      ],
       "default": "2"
     },
     "keepWarm": {
       "type": "string",
       "title": "Keep the prompt cache warm",
       "description": "Keeps the main conversation's prompt cache warm while you are away, by a short ping just before it would expire: a ping reads the cache, at a 12th to an 80th of the price of writing it again, by model. auto: as long as the pings of one absence cost at most a quarter of the rewrite they spare, up to 8 hours: about 26 minutes on a 5-minute cache with the 5.5 models, one ping an hour on a subscription's 1-hour cache. A time: that long after your last turn. off: no pings.",
-      "options": ["auto", "30m", "1h", "2h", "4h", "8h", "off"],
+      "options": [
+        "auto",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "8h",
+        "off"
+      ],
       "default": "auto"
+    },
+    "band": {
+      "type": "string",
+      "title": "Bar above the prompt",
+      "description": "always: the savings and the Settings button stay above the prompt. working: only while subagents run. off: no bar.",
+      "options": [
+        "always",
+        "working",
+        "off"
+      ],
+      "default": "always"
+    },
+    "statusLine": {
+      "type": "string",
+      "title": "Status line",
+      "description": "on: the crabs at work and their time, above Claude's own line. off: none.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    "autoOpen": {
+      "type": "string",
+      "title": "Open the pane by itself",
+      "description": "on: the pane opens when a wave of subagents starts, where it docks beside the chat. off: only from /pennycrab or the bar.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
     }
   }
 }

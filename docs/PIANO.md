@@ -1,8 +1,8 @@
 # pennycrab: stato e piano
 
-Aggiornato il 23 ottobre 2026 · versione 0.4.0 · Claude Code 2.1.302 · branch `main`.
+Aggiornato il 23 ottobre 2026 · versione 0.5.0 · Claude Code 2.1.302 · branch `main`.
 
-Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **La UI della 0.4.0 è stata rifatta e approvata da Simone in Desktop** (sezione 2). Restano pochi punti aperti (2.5). Le sezioni 3 e 4 servono come contesto.
+Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **La UI della 0.4.0 è stata rifatta e approvata da Simone in Desktop** (sezione 2); la 0.5.0 aggiunge la barra fissa e il pannello Settings, anch'essi approvati in Desktop. Restano pochi punti aperti (2.5). Le sezioni 3 e 4 servono come contesto.
 
 ## 1. Dove siamo
 
@@ -14,9 +14,10 @@ Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della 
 | Prezzi (`hooks/prices.ts`) | letti una volta al giorno dalla pagina ufficiale di Anthropic (ogni 10 minuti finché non la raggiunge), salvati tra le sessioni; nessun prezzo nel codice | finito, verificato dal vivo |
 | Configurazione automatica (`hooks/setup.ts`) | al primo turno un toast dice cosa ha rilevato (abbonamento o consumo, cache, router, budget); si ripete solo se cambia | finito, testato |
 | Telemetria (`hooks/telemetry.ts`) | costo, contesto, tempo, strumento in uso per ogni sub-agente; da dove è stato spostato e con che effort, nella sua riga (sopravvive a un ricaricamento); un sub-agente ripreso tiene la sua spesa | finito |
-| **UI** (`hooks/ui.tsx`) | pannello con il risparmio in grande e l'anello della cache, righe a card con chip, banda su una riga, riga di stato, i 6 Clawd vestiti | **rifatta nella 0.4.0, approvata in Desktop** |
+| **UI** (`hooks/ui.tsx`) | pannello con il risparmio in grande e l'anello della cache, righe a card con chip, banda su una riga con Pane e ⚙ Settings, pannello Settings, riga di stato, i 6 Clawd vestiti | **0.4.0 rifatta, 0.5.0 Settings: approvate in Desktop** |
+| Impostazioni (`renderSettings`, `userConfig`) | un menu per opzione (router, budget, keepWarm, band, statusLine, autoOpen) con la spiegazione del valore scelto, scritto con `$.config.set`; una riga bloccata da policy è testo con 🔒; «Reset to defaults» rimette i default; `/pennycrab settings` lo apre anche a barra spenta. Ogni cambio ricarica la mod | finito, approvato in Desktop |
 
-Verifiche: `claude plugin test .` (91 test) e `claude plugin validate .` (questa versione del motore non ha più `--profile`). I test lunghi della cache e dei prezzi simulano ore di attesa e hanno un tempo massimo di 30 s invece di 5. Ogni regola importante ha un test che fallisce se la si rompe; ogni pulsante ha un test che lo preme.
+Verifiche: `claude plugin test .` (97 test) e `claude plugin validate .` (questa versione del motore non ha più `--profile`). I test lunghi della cache e dei prezzi simulano ore di attesa e hanno un tempo massimo di 30 s invece di 5. Ogni regola importante ha un test che fallisce se la si rompe; ogni pulsante ha un test che lo preme.
 
 ## 2. La UI
 
@@ -31,7 +32,7 @@ Chi apre il pannello deve capire **in due secondi** tre cose: quanto ha risparmi
 3. Tocca solo `hooks/ui.tsx` e i suoi test; un dato nuovo va nello stato (`types/index.d.ts`), senza cambiare la logica.
 4. Prima di ogni commit: `claude plugin test .` e `claude plugin validate .` verdi. Prima di cambiare il disegno, una bozza mostrata a Simone; dopo, la prova dal vivo.
 
-### 2.3 Cosa c'è oggi (0.4.0)
+### 2.3 Cosa c'è oggi (0.5.0)
 
 | Superficie | Cosa disegna | Dove nel codice |
 | --- | --- | --- |
@@ -39,9 +40,9 @@ Chi apre il pannello deve capire **in due secondi** tre cose: quanto ha risparmi
 | Pannello vuoto, Desktop | il granchio con la moneta e tre righe su cosa fa la mod | `emptySvg` |
 | Pannello compatto, Desktop | una fila di granchi e i totali | `shelfSvg` |
 | Pannello, terminale | lo stesso in testo, con barre `█░` e la riga della cache | `renderPane`, ramo terminale, `cacheLine` |
-| Banda, Desktop | una card su una riga: fino a 5 granchi, «N working · M stopped by the guard», «spent ≈$X», «saved $Y»; sotto, un solo pulsante «Pennycrab ›» che apre o chiude il pannello | `renderBand`, `bandSvg` |
-| Banda, terminale | «N running · M handover», barra del contesto principale, «saved $X», pulsanti ×N e ✕ | `renderBand`, ramo terminale |
-| Riga di stato | `🦀S 21% 1m59s` per al massimo due sub-agenti, poi «🦀 saved $X» | `statusLine`, `tick` |
+| Banda | una riga, sempre (opzione `band`: `always`, `working`, `off`): fino a 5 granchi (▣ colorati sul terminale) o il granchio con la moneta a riposo, «N working · M stopped by the guard», «spent ≈$X», «saved $Y», pulsanti **Pane** e **⚙ Settings**. Le bande di altre mod stanno sotto, distanziate di una riga | `renderBand`, `crewSvg` |
+| Pannello Settings | sezioni ROUTER · GUARD · CACHE · DISPLAY, per ogni opzione il nome su una riga, il menu sotto (accanto a un nome lungo usciva dal bordo), la spiegazione del valore; «Reset to defaults» | `renderSettings`, `FIELDS` |
+| Riga di stato | `🦀S 21% 1m59s` per al massimo due sub-agenti, poi «🦀 saved $X»; spenta con `statusLine: off` | `statusLine`, `tick` |
 | Granchi | i 6 Clawd vestiti approvati: Haiku fattorino, Sonnet esploratore, Opus banchiere, Fable re, Pennycrab con la moneta (modello sconosciuto), Guardiano (fermato) | `COSTUMES`, `crab` |
 
 Un sub-agente fermato dal guardiano sta in STOPPING · GUARD finché lavora; quando finisce passa in FINISHED, con il casco e il chip «⚑ over budget».
@@ -74,6 +75,7 @@ Restano:
 3. **Il `?` di un costo sconosciuto** non ha ancora la spiegazione al passaggio del mouse.
 4. **Parole dell'anello diverse per abbonamento e consumo** («ping orari, fino a 8 h»): oggi sono le stesse.
 5. **Terminale stretto** (40 colonne): non riguardato in questo giro.
+6. **Ricarica a metà lavoro.** Ogni cambio di opzione ricarica la mod: non verificato se un sub-agente in corso resta tracciato e se il guardiano riparte da zero (la sua mappa è una variabile del modulo).
 
 ### 2.6 Criteri di accettazione (0.4.0)
 

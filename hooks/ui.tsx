@@ -345,29 +345,11 @@ function shelfSvg(w: number, list: Agent[], cost: number, saved: number) {
   )
 }
 
-// The band: crabs at work, how many and how many the guard stopped, what was spent and saved.
-const BAND_H = 40
-const runningText = (live: Agent[]) => {
-  const guarded = live.filter(isGuarded).length
-  return `${live.length - guarded} running${guarded ? ` · ${guarded} handover` : ''}`
-}
-function bandSvg(w: number, live: Agent[], cost: number, saved: number) {
-  const guarded = live.filter(isGuarded).length
-  const crabs = Math.min(live.length, 5)
-  const tx = 10 + crabs * 32 + 6
-  const working = `${live.length - guarded} working`
-  const right = saved > 0 ? `saved ${fmtUsd(saved)}` : ''
-  const rw = widthOf(right, 12.5)
-  return svg(
-    w,
-    BAND_H,
-    `<rect class="card" x="0" y="2" width="${w}" height="${BAND_H - 4}" rx="10"/>` +
-      live.slice(0, crabs).map((a, i) => crab(10 + i * 32, 6, costumeOf(a), true, 2)).join('') +
-      label(tx, 25, 12.5, 'fg', working, SB) +
-      (guarded ? label(tx + widthOf(working, 12.5) + 6, 25, 12, 'dim', `· ${guarded} stopped by the guard`) : '') +
-      (right ? label(w - 14, 25, 12.5, 'good', right, `${B} text-anchor="end"`) : '') +
-      (w > 520 ? label(w - 14 - (rw ? rw + 16 : 0), 25, 11.5, 'dim', `spent ≈${fmtUsd(cost)}`, ' text-anchor="end"') : ''),
-  )
+// The band's crabs: those at work, or pennycrab's own with its penny while none is.
+const CREW_H = 28
+const crewSvg = (live: Agent[]) => {
+  const shown = live.slice(0, 5)
+  return svg(Math.max(1, shown.length) * 32, CREW_H, shown.length ? shown.map((a, i) => crab(i * 32, 0, costumeOf(a), true, 2)).join('') : crab(0, 0, 'other', false, 2))
 }
 
 // --- terminal: the same content as text.
@@ -502,57 +484,174 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   )
 }
 
-// The band shows while subagents run; other mods' bands stay beneath it. It draws nothing that moves with time,
-// so it reads neither the clock nor the cache, and is not redrawn each second.
-export async function renderBand($: EngineInterface, e: RenderInput<'AbovePrompt'>, next: (e: RenderInput<'AbovePrompt'>) => Promise<RenderElement>) {
+// What the person chose to see: the band always, while subagents work or never; the status line; the pane opening
+// by itself. They are options, so a change reloads pennycrab with the new ones.
+export type Display = { band: 'always' | 'working' | 'off'; isStatusLine: boolean; isAutoOpen: boolean }
+export const displayOf = (o: Record<string, unknown>): Display => ({
+  band: o.band === 'working' || o.band === 'off' ? o.band : 'always',
+  isStatusLine: o.statusLine !== 'off',
+  isAutoOpen: o.autoOpen !== 'off',
+})
+
+// The band above the prompt: crabs, who is working, what was spent and saved, and the Pane and Settings buttons on
+// the same row. Other mods' bands stay beneath it. It draws nothing that moves with time, so it reads neither the
+// clock nor the cache, and is not redrawn each second.
+export async function renderBand(
+  $: EngineInterface,
+  e: RenderInput<'AbovePrompt'>,
+  next: (e: RenderInput<'AbovePrompt'>) => Promise<RenderElement>,
+  display: Display,
+) {
   noteViewport(e)
   const list = await read($, agents)
   const m = await read($, main)
   const s = await read($, savings)
-  const u = await read($, ui)
-  const mainPct = pctOf(m)
   const live = list.filter(isLive)
-  if (live.length === 0 || u.isBandHidden || e.props.hasSurvey) return next(e)
+  if (display.band === 'off' || (display.band === 'working' && live.length === 0) || e.props.hasSurvey) return next(e)
   // The engine's own empty band ({ type: 'engine' }) must not end up inside ours: the desktop then drops the whole band.
   const drawn = await Promise.resolve(next(e)).catch(() => null)
   const below = drawn && typeof drawn === 'object' && (drawn as { type?: string }).type !== 'engine' ? drawn : null
 
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const crew = <Button key="pennycrab-crew" plain label={`×${live.length}`} onPress={() => void togglePane($)} />
-  const hide = <Button key="pennycrab-hide" plain role="dismiss" label="✕" onPress={() => update($, ui, v => ({ ...v, isBandHidden: true }))} />
-
+  const guarded = live.filter(isGuarded).length
+  const saved = s.usd > 0 ? `saved ${fmtPriced(s.usd)}` : s.usd < 0 ? `saved ${fmtUsd(s.usd)}` : 'nothing saved yet'
   // The terminal also lists an Svg, which draws nothing there, so the surface is checked as well.
-  if (e.surface !== 'terminal' && 'Svg' in r) {
-    const { Svg } = r
-    // A column is about 8px. The desktop puts a button on a line of its own, so there is one, under the drawing:
-    // the band goes by itself once the subagents end.
-    const w = Math.max(180, Math.min(1600, (e.props.bodyColumns || 100) * 8 - 16))
-    return (
-      <Box flexDirection="column">
-        <Svg source={bandSvg(w, live, m.costUsd, s.usd)} alt={`${runningText(live)}, saved ${fmtUsd(s.usd)}`} width={w} height={BAND_H} />
-        <Button key="pennycrab-open" plain label="Pennycrab ›" onPress={() => void togglePane($)} />
-        {below}
-      </Box>
+  const crabs =
+    e.surface !== 'terminal' && 'Svg' in r ? (
+      <r.Svg source={crewSvg(live)} alt={`${live.length} subagents`} width={Math.max(1, Math.min(live.length, 5)) * 32} height={CREW_H} />
+    ) : (
+      <Text>
+        {live.length ? live.slice(0, 6).map(a => <Text key={a.id} color={isGuarded(a) ? WARN : COLOR[a.tier]}>▣</Text>) : '🦀'}
+      </Text>
     )
-  }
-
-  const barW = Math.max(6, Math.min(20, (e.props.bodyColumns || 80) - 50))
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" gap={2}>
-        <Text>
-          {live.slice(0, 6).map(a => (
-            <Text key={a.id} color={isGuarded(a) ? WARN : COLOR[a.tier]}>▣</Text>
-          ))}
+      <Box flexDirection="row" alignItems="center" gap={2} width={e.props.bodyColumns}>
+        {crabs}
+        {live.length ? <Text bold>{`${live.length - guarded} working`}</Text> : <Text dimColor>pennycrab</Text>}
+        {guarded > 0 && <Text color="warning">{`· ${guarded} stopped by the guard`}</Text>}
+        <Box flexGrow={1} />
+        {live.length > 0 && <Text dimColor>{`spent ≈${fmtUsd(m.costUsd)}`}</Text>}
+        <Text bold={s.usd > 0} color={s.usd > 0 ? 'success' : s.usd < 0 ? 'error' : undefined} dimColor={s.usd === 0}>
+          {live.length || s.usd === 0 ? saved : `${saved} this session`}
         </Text>
-        <Text bold>{runningText(live)}</Text>
-        <Text dimColor>{`main ${textBar(mainPct, barW)} ${mainPct}%`}</Text>
-        {s.usd > 0 && <Text color="green">{`saved ${fmtUsd(s.usd)}`}</Text>}
-        {crew}
-        {hide}
+        <Button key="pennycrab-pane" plain label="Pane" onPress={() => void togglePane($)} />
+        <Button key="pennycrab-settings" plain label="⚙ Settings" onPress={() => void openSettings($)} />
       </Box>
-      {below}
+      {below && <Box marginTop={1}>{below}</Box>}
+    </Box>
+  )
+}
+
+// --- settings: every option of pennycrab's, changed through the engine's /config rows.
+
+export const SETTINGS = 'pennycrab-settings'
+type Field = { field: string; section: string; name: string; def: string; hint: (v: string) => string; label?: (v: string) => string }
+const FIELDS: Field[] = [
+  {
+    field: 'router',
+    section: 'ROUTER',
+    name: 'Which subagents move to a cheaper model',
+    def: 'auto',
+    hint: v =>
+      ({
+        auto: 'Explore runs on Haiku at low effort; general-purpose on Sonnet when you are on Opus or Fable.',
+        explore: 'Explore, which only reads and searches, runs on Haiku at low effort. Subagents that write code keep your model.',
+        prudent: 'Explore and general-purpose run on Sonnet when you are on Opus or Fable.',
+        off: 'Every subagent runs on your model.',
+      })[v] ?? '',
+  },
+  {
+    field: 'budget',
+    section: 'GUARD',
+    name: 'Budget per subagent',
+    def: '2',
+    hint: v => (v === 'off' ? 'No guard: a subagent may spend without a cap.' : 'Past it, the subagent is asked to hand back what it found, then stopped if it keeps going.'),
+    label: v => (v === 'off' ? 'off' : `$${v}`),
+  },
+  {
+    field: 'keepWarm',
+    section: 'CACHE',
+    name: 'Keep the prompt cache warm while you are away',
+    def: 'auto',
+    hint: v =>
+      v === 'off'
+        ? 'No pings: after the cache lapses, your next message writes it again.'
+        : v === 'auto'
+          ? 'A short ping before the cache lapses, while the pings cost less than the rewrite they spare, up to 8 hours.'
+          : `A short ping before the cache lapses, for ${v} after your last message.`,
+  },
+  {
+    field: 'band',
+    section: 'DISPLAY',
+    name: 'Bar above the prompt',
+    def: 'always',
+    hint: v => ({ always: 'The savings and the Settings button stay in reach.', working: 'Only while subagents run.', off: 'No bar: Settings is then /pennycrab settings.' })[v] ?? '',
+    label: v => (v === 'working' ? 'while subagents work' : v),
+  },
+  { field: 'statusLine', section: 'DISPLAY', name: 'Status line', def: 'on', hint: () => "The crabs at work and their time, above Claude's own line." },
+  { field: 'autoOpen', section: 'DISPLAY', name: 'Open the pane by itself', def: 'on', hint: () => 'When a wave of subagents starts, where the pane docks beside the chat.' },
+]
+// A row of ours: `<plugin>.<field>`, the plugin named as installed (pennycrab, or pennycrab@<marketplace>).
+const fieldOf = (key: string) => (/^pennycrab(@[^.]*)?\./.test(key) ? key.slice(key.indexOf('.') + 1) : undefined)
+
+export async function openSettings($: EngineInterface) {
+  await $.ui.open({ id: SETTINGS, title: 'Pennycrab settings' })
+}
+
+async function setOption($: EngineInterface, key: string, value: string) {
+  const { deny } = await $.config.set({ key, value })
+  if (deny) $.ui.toast(`Pennycrab could not change it: ${deny}`)
+}
+
+export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>) {
+  const r = $.ui.resolve(e)
+  const { Box, Text, Button } = r
+  const rows = new Map((await $.config.list()).flatMap(row => (fieldOf(row.key) ? [[fieldOf(row.key)!, row] as const] : [])))
+  const shown = FIELDS.filter(f => rows.has(f.field))
+  const sections = [...new Set(shown.map(f => f.section))]
+  const reset = async () => {
+    for (const f of shown) if (!rows.get(f.field)!.isLocked && String(rows.get(f.field)!.value) !== f.def) await setOption($, rows.get(f.field)!.key, f.def)
+  }
+  return (
+    <Box flexDirection="column" gap={1}>
+      {sections.map(section => (
+        <Box key={section} flexDirection="column">
+          <Text bold dimColor>{section}</Text>
+          {shown
+            .filter(f => f.section === section)
+            .map(f => {
+              const row = rows.get(f.field)!
+              const value = String(row.value)
+              const label = f.label ?? (v => v)
+              return (
+                <Box key={f.field} flexDirection="column" marginTop={1}>
+                  {row.isLocked || !('Select' in r) ? (
+                    <Text>
+                      <Text bold>{f.name}</Text>
+                      <Text dimColor>{`  ${row.isLocked ? '🔒 ' : ''}${label(value)}${row.isLocked ? ' · set by your organization' : ''}`}</Text>
+                    </Text>
+                  ) : (
+                    // The name on its own line: beside a long one the menu runs past the pane's edge.
+                    <Box flexDirection="column">
+                      <Text bold>{f.name}</Text>
+                      <r.Select
+                      key={`pennycrab-${f.field}`}
+                      value={value}
+                      options={(row.options ?? [value]).map(v => ({ value: v, label: label(v) }))}
+                      onSelect={v => void setOption($, row.key, v)}
+                      />
+                    </Box>
+                  )}
+                  <Text dimColor wrap="wrap">{f.hint(value)}</Text>
+                </Box>
+              )
+            })}
+        </Box>
+      ))}
+      <Text dimColor>Changes apply at once: pennycrab reloads with them.</Text>
+      <Button key="pennycrab-reset" plain label="Reset to defaults" onPress={() => void reset()} />
     </Box>
   )
 }
@@ -568,12 +667,12 @@ function statusLine(list: Agent[], saved: number, at: number) {
 let shownStatus: string | undefined
 // Each second: while subagents run the clock the drawings read moves on, and the status line follows; while the
 // cache counts down, every CACHE_TICK_MS.
-export async function tick($: EngineInterface) {
+export async function tick($: EngineInterface, display: Display) {
   const list = await read($, agents)
   const at = await $.clock.now()
   const isCounting = isCacheCounting(await read($, cache), await read($, now), at)
   if (list.some(isLive) || isCounting) await update($, now, () => at)
-  const line = statusLine(list, (await read($, savings)).usd, at)
+  const line = display.isStatusLine ? statusLine(list, (await read($, savings)).usd, at) : undefined
   if (line !== shownStatus) $.ui.status((shownStatus = line))
 }
 
@@ -599,12 +698,11 @@ function noteViewport(e: RenderInput<'Pane'> | RenderInput<'AbovePrompt'>) {
 }
 const isSidebar = () => docks.size === 0 || [...docks.values()].some(Boolean)
 
-// A new subagent brings the band back. The first of a wave (`isFirst`: none other running) opens the pane:
+// The first of a wave (`isFirst`: none other running) opens the pane:
 // closed during a wave, it stays closed until the next one.
-export async function onSpawnUi($: EngineInterface, isFirst: boolean) {
+export async function onSpawnUi($: EngineInterface, isFirst: boolean, display: Display) {
   const at = await $.clock.now()
   await update($, now, () => at)
-  await update($, ui, v => ({ ...v, isBandHidden: false }))
   // The pane is a nicety: a refused open must never reach the spawn.
-  if (isFirst && isSidebar()) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
+  if (isFirst && display.isAutoOpen && isSidebar()) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
 }

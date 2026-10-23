@@ -36,18 +36,21 @@ To remove it: `/plugin uninstall pennycrab`.
 
 - **A toast after your first message** says what pennycrab found and chose: a Claude subscription or pay-per-token use, how long your cache lasts, where Explore and general-purpose run, the budget. It shows again only when one of those changes.
 - **The pane** (`/pennycrab` shows or hides it; it opens by itself when a wave of subagents starts, where it docks beside the conversation, so not on the terminal's main screen): the session's cost, what was saved and the main context at the top; a line on the cache; one row per subagent, running ones first, with its model, where it was routed from, the tool it is using, its context, cost and time. A subagent stopped at its budget moves under **Guard**.
-- **The band above the prompt** while subagents run: their crabs, how many are running, the main context and what was saved.
+- **The band above the prompt**: the crabs at work and how many, what was spent and saved, and the **Pane** and **⚙ Settings** buttons. Settings has one menu per option below, each with what its value does, and **Reset to defaults**; `/pennycrab settings` opens it too.
 - **The status line**: up to two running subagents with their model's letter, context and time, then what was saved.
 
 ## Options
 
-Set them in the config menu, or with `/plugin configure pennycrab`.
+Set them from **⚙ Settings** on the band, in the config menu, or with `/plugin configure pennycrab`. A change reloads pennycrab with it.
 
 | Option | Values | Default | What it does |
 | --- | --- | --- | --- |
 | `router` | `auto`, `explore`, `prudent`, `off` | `auto` | `auto`: Explore runs on Haiku at low effort from any model above it; general-purpose runs on Sonnet from Opus or Fable. `explore`: Explore as in `auto`, general-purpose keeps your model. `prudent`: both on Sonnet, from Opus or Fable only. Never a model above yours. A subagent type you defined, an explicit model in the Agent call, a fork, `CLAUDE_CODE_SUBAGENT_MODEL`, Bedrock, Vertex and Foundry are left alone. |
 | `budget` | `0.50`, `1`, `2`, `5` (USD), `off` | `2` | The most one subagent may spend. Past it, a subagent that wants to go on gets its tool calls refused with a note to write its final answer from what it found. If it keeps calling tools, its third request after that is answered by pennycrab, which ends its turn. |
 | `keepWarm` | `auto`, `30m`, `1h`, `2h`, `4h`, `8h`, `off` | `auto` | `auto`: pings while the pings of one absence cost at most a quarter of the rewrite they spare, for 8 hours at most. How far that reaches depends on the model's cache prices. On a 5-minute cache: about 26 minutes on Opus 5.5 and Sonnet 5.5, 56 on Fable 5.1, 13 on Haiku and on the older models whose cache reads cost a tenth of input. On a subscription's 1-hour cache, one ping an hour: 8 hours on the 5.5 models and Fable 5.1, about 5 on the others. A time: pings for that long after your last turn. |
+| `band` | `always`, `working`, `off` | `always` | When the band above the prompt shows: always, only while subagents run, or never. |
+| `statusLine` | `on`, `off` | `on` | The crabs at work and their time on the status line. |
+| `autoOpen` | `on`, `off` | `on` | Whether the pane opens by itself when a wave of subagents starts. |
 
 ## How the numbers are counted
 

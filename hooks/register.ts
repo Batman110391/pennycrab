@@ -9,7 +9,7 @@ import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
 import { announceSetup } from './setup'
 import { addAgent, finish, recordStep, setTool } from './telemetry'
-import { onSpawnUi, renderBand, renderPane, tick, togglePane } from './ui'
+import { displayOf, onSpawnUi, openSettings, renderBand, renderPane, renderSettings, tick, togglePane } from './ui'
 
 // One hook per event (the engine takes no second unmatched one); each module adds its part here.
 // Every hook fails open: on an error the engine's own behaviour goes on.
@@ -17,23 +17,28 @@ export const register: Register = (on, options) => {
   const mode = (options.router as RouterMode | undefined) ?? 'auto'
   const budgetUsd = budgetOf(options.budget as Budget | undefined)
   const warm = keepWarmOf(options.keepWarm as KeepWarm | undefined)
+  const display = displayOf(options)
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost' })
+    await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost. /pennycrab settings: its options' })
     await loadStoredPrices($)
     // The page again every ten minutes while the kept prices are a day old or missing (no network at the start).
     void refreshPrices($).catch(() => undefined)
     $.clock.every(10 * 60_000, () => void refreshPrices($).catch(() => undefined))
     $.clock.every(1000, () => {
-      void tick($)
+      void tick($, display)
       void keepWarm($, warm).catch(() => undefined)
     })
     return next(e)
   })
 
-  on('command.run', { command: 'pennycrab' }, async $ => ({ text: (await togglePane($)) ? 'Pennycrab pane opened.' : 'Pennycrab pane closed.' }))
+  on('command.run', { command: 'pennycrab' }, async ($, e) => {
+    if (e.args.trim() === 'settings') return { text: (await openSettings($), 'Pennycrab settings opened.') }
+    return { text: (await togglePane($)) ? 'Pennycrab pane opened.' : 'Pennycrab pane closed.' }
+  })
 
   on('ui.render', { component: 'Pane', requestId: 'pennycrab' }, ($, e) => renderPane($, e))
+  on('ui.render', { component: 'Pane', requestId: 'pennycrab-settings' }, ($, e) => renderSettings($, e))
 
   // Nothing on screen says how a closed pane comes back, so the close says it.
   on('ui.close', ($, e, next) => {
@@ -41,11 +46,11 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => renderBand($, e, next)).catch(($, e, next) => next(e))
+  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => renderBand($, e, next, display)).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const { started, route } = await spawnRouted($, e, next, mode)
-    if (started.agentId !== undefined) await onSpawnUi($, await addAgent($, e, started.agentId, started.model, route))
+    if (started.agentId !== undefined) await onSpawnUi($, await addAgent($, e, started.agentId, started.model, route), display)
     return started
   }).catch(($, e, next) => next(e))
 
