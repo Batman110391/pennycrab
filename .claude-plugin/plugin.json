@@ -1,6 +1,6 @@
 {
   "name": "pennycrab",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
   "author": {
     "name": "Batman110391"

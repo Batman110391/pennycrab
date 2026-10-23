@@ -97,7 +97,8 @@ test('tierOf reads the family from an id or an alias', () => {
 const T0 = Date.parse('2026-10-22T10:00:00Z')
 const DAY = 24 * 3600_000
 type Page = { ok: boolean; text: string } | 'down'
-function world(on: On, stored: unknown, page: Page | (() => Page)) {
+// `ctx`: the main context, and the window the engine compacts at, which it names only when asked for a breakdown.
+function world(on: On, stored: unknown, page: Page | (() => Page), ctx?: { tokens: number; compactAt: number }) {
   const fetched: string[] = []
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, {})
@@ -111,7 +112,10 @@ function world(on: On, stored: unknown, page: Page | (() => Page)) {
   on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
   on('session.start', async () => ({ cwd: '/repo' }) as never)
-  on('session.usage', async () => ({ value: { startedAt: 0, context: { tokens: 0, window: 1_000_000, percent: 0 }, rateLimits: [] } }) as never)
+  on('session.usage', async (_$, e) => {
+    const breakdown = e.breakdown && ctx ? { rawMaxTokens: ctx.compactAt } : undefined
+    return { value: { startedAt: 0, context: { tokens: ctx?.tokens ?? 0, window: 1_000_000, percent: 0, breakdown }, rateLimits: [] } } as never
+  })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'a1' }) as never)
   on('turn.step', async function* (_$, e) {
     const u: TurnUsage = { model: e.model, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
@@ -233,4 +237,11 @@ test('units "tokens" with no prices: ?, never a made-up figure', { options: { un
   await start($, clock)
   await mainStep($)
   expect((await pane($)).filter(t => /ctx \d+%/.test(t)).join(' ')).toContain(' · ? · ')
+})
+
+test('main context is a share of the window the engine compacts at, not of the model\'s', async ($: Engine, on) => {
+  const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down', { tokens: 373_000, compactAt: 400_000 })
+  await start($, clock)
+  await mainStep($)
+  expect((await deskSvgs($))[0]!.source).toContain('Main context 93%')
 })

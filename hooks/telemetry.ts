@@ -79,9 +79,12 @@ export async function addAgent(
 
 export async function recordStep($: EngineInterface, agentId: string | undefined, model: string, u: Usage) {
   // The session's cost is the engine's own, every subagent's and ping's included: each step brings it up to date.
-  const s = await $.session.usage()
+  // A main step also asks for the local summary breakdown, which sends no request: it names the window the engine
+  // compacts at, which can be well under the model's (373K of 1M, seen live), and the share is of that one.
+  const s = await $.session.usage(agentId === undefined ? { breakdown: 'summary' } : undefined)
   if (agentId === undefined) {
-    await update($, main, () => ({ model, contextTokens: s.context.tokens ?? 0, contextWindow: s.context.window, costUsd: s.cost?.usd ?? 0 }))
+    const window = s.context.breakdown?.rawMaxTokens ?? s.context.window
+    await update($, main, () => ({ model, contextTokens: s.context.tokens ?? 0, contextWindow: window, costUsd: s.cost?.usd ?? 0 }))
     return
   }
   await update($, main, m => ({ ...m, costUsd: s.cost?.usd ?? m.costUsd }))
