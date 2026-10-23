@@ -77,7 +77,8 @@ export async function guardStep($: EngineInterface, agentId: string | undefined,
 // tokens pass the forecast, and at the third same call with the same result. The fifth hands it over.
 export async function afterTool($: EngineInterface, agentId: string, call: object, ran: ToolCallResult, limits: Limits): Promise<ToolCallResult> {
   if (limits.forecast === 'off' || ran.deny !== undefined || (call as { tool?: string }).tool === HANDBACK) return ran
-  const { tool_use_id: _id, agentId: _agent, requestMeta: _meta, consent: _consent, ...args } = call as Record<string, unknown>
+  // A description is prose about the call, and a looping model often rewords it: it is no part of what repeats.
+  const { tool_use_id: _id, agentId: _agent, requestMeta: _meta, consent: _consent, description: _about, ...args } = call as Record<string, unknown>
   const key = JSON.stringify([args, ran.text ?? ran.result])
   const n = repeats.get(agentId)?.call === key ? repeats.get(agentId)!.n + 1 : 1
   repeats.set(agentId, { call: key, n })

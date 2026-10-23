@@ -241,6 +241,13 @@ test('the same call with the same result: a note at the third, a handover at the
   expect(sent.toasts.length).toBe(1)
 })
 
+test('the same call reworded in its description still counts as the same call', async ($: Engine, on) => {
+  await session($, on)
+  const calls = []
+  for (let i = 1; i <= 6; i++) calls.push(await $.tool.call({ tool: 'Bash', command: 'echo ping', description: `attempt ${i}`, agentId: 'a1' }))
+  expect(calls.map(c => c.deny !== undefined)).toEqual([false, false, false, false, false, true])
+})
+
 // Nine runs of its kind: the tenth, once it answers, makes the next spawn's forecast.
 const NINE = { 'Explore · haiku': Array(9).fill(400_000) }
 const again = ($: Engine) =>
