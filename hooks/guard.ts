@@ -20,7 +20,9 @@ export function budgetOf(option: Budget | undefined): number | undefined {
   return b === 'off' ? undefined : Number(b)
 }
 
-// Requests a handed-over subagent still gets: one to read the refusals and answer, one to spare.
+// The one tool that delivers a subagent's report to the session that started it: never refused, never counted.
+export const HANDBACK = 'SubagentHandback'
+// Requests a handed-over subagent still gets: one to read the refusals and hand back, one to spare.
 const WRAP_STEPS = 2
 // The same call with the same result, in a row: a nudge at the third, a handover at the fifth.
 const LOOP_NUDGE = 3
@@ -74,7 +76,7 @@ export async function guardStep($: EngineInterface, agentId: string | undefined,
 // After each of a subagent's tool calls, a note it reads beside the result and the person never sees: once its
 // tokens pass the forecast, and at the third same call with the same result. The fifth hands it over.
 export async function afterTool($: EngineInterface, agentId: string, call: object, ran: ToolCallResult, limits: Limits): Promise<ToolCallResult> {
-  if (limits.forecast === 'off' || ran.deny !== undefined) return ran
+  if (limits.forecast === 'off' || ran.deny !== undefined || (call as { tool?: string }).tool === HANDBACK) return ran
   const { tool_use_id: _id, agentId: _agent, requestMeta: _meta, consent: _consent, ...args } = call as Record<string, unknown>
   const key = JSON.stringify([args, ran.text ?? ran.result])
   const n = repeats.get(agentId)?.call === key ? repeats.get(agentId)!.n + 1 : 1
@@ -103,17 +105,18 @@ export function forget(agentId: string) {
   repeats.delete(agentId)
 }
 
-// What a handed-over subagent reads in place of each tool's result. Its answer opens with why, so the session
-// that started it knows the work was cut short and can start a narrower one.
-export async function denyOf($: EngineInterface, agentId: string, limits: Limits) {
+// What a handed-over subagent reads in place of each tool's result, its hand-back alone let through. Its report
+// opens with why, so the session that started it knows the work was cut short and can start a narrower one.
+export async function denyOf($: EngineInterface, agentId: string, tool: string, limits: Limits) {
+  if (tool === HANDBACK) return undefined
   const a = await handedOver($, agentId)
   if (!a) return undefined
   const why = reasonOf(a, limits)
-  return `pennycrab stopped this subagent: ${why}. Do not call any more tools. Write your final answer now from what you have already found, and say what you could not check. Begin it with "Stopped by pennycrab: ${why}."`
+  return `pennycrab stopped this subagent: ${why}. Call no other tool. Call ${HANDBACK} now with your report from what you have already found, and say what you could not check. Begin it with "Stopped by pennycrab: ${why}."`
 }
 
-// A handed-over subagent that keeps calling tools gets WRAP_STEPS more requests; pennycrab answers the next
-// one itself, which ends its turn.
+// A handed-over subagent that keeps calling tools gets WRAP_STEPS more requests; pennycrab hands back for it at
+// the next one, which ends its turn.
 export async function stopOf($: EngineInterface, agentId: string | undefined, limits: Limits) {
   if (agentId === undefined) return undefined
   const a = await handedOver($, agentId)
@@ -124,9 +127,12 @@ export async function stopOf($: EngineInterface, agentId: string | undefined, li
   return `Stopped by pennycrab before a final answer: ${reasonOf(a, limits)}, and it kept calling tools after it was asked to wrap up.`
 }
 
-// A response no model wrote: the text alone, then the stop.
-export async function* answerAlone(e: TurnStepInput, text: string): AsyncGenerator<TurnStepChunk, TurnStepResult> {
-  yield { kind: 'text', index: 0, text }
-  yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-  return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
+// A response no model wrote: the hand-back call with `text` as the report. A plain answer would not do: the engine
+// takes a subagent's report from its hand-back alone, and asks again for one. Built chunks are taken at their word.
+export async function* handBackAlone(e: TurnStepInput, text: string): AsyncGenerator<TurnStepChunk, TurnStepResult> {
+  const input = { message: text }
+  yield { kind: 'tool', index: 0, id: `pennycrab-${e.turnId}-${e.index}`, name: HANDBACK }
+  yield { kind: 'input', index: 0, json: JSON.stringify(input) }
+  yield { kind: 'stop', stopReason: 'tool_use', usage: null }
+  return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ name: HANDBACK, input }], stopReason: 'tool_use', usage: null }
 }

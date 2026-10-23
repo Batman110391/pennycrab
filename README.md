@@ -97,7 +97,7 @@ Never a model above yours. Left alone: a subagent type you defined, an explicit 
 - **Where it comes from:** the project's own runs once it has 10, else every project's. There is no forecast before 10 runs of a kind.
 - **What it learns from:** runs that ended with their answer. Runs that were handed over or resumed, and teammates, are left out, so a cut-short run never lowers the forecast.
 - **Past the forecast**, a note beside the subagent's next tool result asks it to wrap up unless it is nearly done. You do not see the note.
-- **Past twice the forecast**, its tool calls are refused with a note to write its final answer from what it found, opening with why. If it keeps calling tools, its third request after that is answered by pennycrab, which ends its turn. A toast tells you.
+- **Past twice the forecast**, its tool calls are refused with a note to hand back its report now, from what it found, opening with why. Its hand-back is never refused, so the report reaches the session that started it. If it keeps calling tools instead, pennycrab hands back for it at its third request, which ends its turn. A toast tells you.
 - **A loop:** the same tool call with the same result three times in a row gets a note, five times a handover. A call in between, such as an edit before running the tests again, starts the count over.
 
 The spend cap hands a subagent over the same way.
@@ -141,6 +141,7 @@ Nothing of it leaves your machine.
 ## Known limits
 
 - **The forecast does not see how big a task is.** An Explore over a monorepo and one over a single file share a history. That is why it nudges first and hands over only at twice the forecast.
+- **The hand-back pennycrab makes for a subagent that ignores the refusals has not been seen live.** In the live tests, every subagent handed back by itself once refused.
 - **The first 10 runs of each kind have no forecast.** Until then only the loop check and the spend cap, if set, hand a subagent back.
 - **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. How a subagent that is running at that moment carries on has not been checked live.
 - **Settings has no menus on mobile**, where the elements pennycrab draws have no menu. Change the options from a computer.

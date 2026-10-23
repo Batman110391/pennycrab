@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from './cache'
 import type { KeepWarm } from './cache'
 import { forecastFor, forecastModeOf, keyOf, learn } from './forecast'
-import { afterTool, answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
+import { afterTool, budgetOf, denyOf, forget, guardStep, handBackAlone, stopOf } from './guard'
 import type { Budget, Limits } from './guard'
 import { loadStoredPrices, refreshPrices, tierOf } from './prices'
 import { spawnRouted, withRoutedEffort } from './router'
@@ -70,7 +70,7 @@ export const register: Register = (on, options) => {
 
   on('turn.step', async function* ($, e, next) {
     const stop = await stopOf($, e.agentId, limits)
-    if (stop !== undefined) return yield* answerAlone(e, stop)
+    if (stop !== undefined) return yield* handBackAlone(e, stop)
     // The main thread's cache entry lives from the request's start, not from the end of its reply.
     const sentAt = e.agentId === undefined ? await $.clock.now() : 0
     const result = yield* next(await withRoutedEffort($, e))
@@ -85,7 +85,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const id = e.agentId
     if (id === undefined) return next(e)
-    const deny = await denyOf($, id, limits)
+    const deny = await denyOf($, id, e.tool, limits)
     if (deny !== undefined) return { deny }
     await setTool($, id, e.tool)
     const ran = await next(e)

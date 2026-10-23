@@ -120,8 +120,9 @@ test('past its budget a subagent is refused its tools, then stopped if it keeps 
   expect(main.deny).toBeUndefined()
   expect({ steps: sent.steps, tools: sent.tools }).toEqual({ steps: 3, tools: 1 })
   expect(sent.toasts).toEqual(['Pennycrab handed over "Find the auth flow": it reached its $2.00 budget.'])
-  expect(last.answer).toContain('Stopped by pennycrab')
-  expect(last.toolUses.length).toBe(0)
+  // The engine takes a subagent's report from its hand-back alone: pennycrab's own last word is one.
+  expect(last.toolUses.map(u => u.name)).toEqual(['SubagentHandback'])
+  expect(JSON.stringify(last.toolUses[0]!.input)).toContain('Stopped by pennycrab')
   expect({ guard, why }).toEqual({ guard: 1, why: 1 })
 })
 
@@ -260,4 +261,13 @@ test('a run handed over stays out of the history', { options: { budget: '2' } },
   await $.turn.complete({ reason: 'answer', answer: 'Stopped by pennycrab', durationMs: 1, isAborted: false, turnId: 'turn1', agentId: 'a1' })
   await again($)
   expect(await tokText($)).not.toContain(' / ')
+})
+
+test('a handed-over subagent may still hand back its report: that one tool is never refused', { options: { budget: '2' } }, async ($: Engine, on) => {
+  await session($, on)
+  await step($, 0)
+  const other = await $.tool.call(read)
+  const handback = await $.tool.call({ tool: 'SubagentHandback', message: 'Stopped by pennycrab: the auth flow is in src/auth.ts', agentId: 'a1' } as never)
+  expect(other.deny).toContain('Call SubagentHandback now')
+  expect(handback.deny).toBeUndefined()
 })
