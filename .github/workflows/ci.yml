@@ -1,0 +1,16 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The build pennycrab is tested against; raise it on purpose, after a local run passes.
+      - run: npm install -g @anthropic-ai/claude-code@2.1.302
+      - run: claude plugin validate .
+      - run: claude plugin test .
