@@ -44,7 +44,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'pennycrab' }, ($, e) => renderPane($, e, display))
-  on('ui.render', { component: 'Pane', requestId: 'pennycrab-settings' }, ($, e) => renderSettings($, e))
+  on('ui.render', { component: 'Pane', requestId: 'pennycrab-settings' }, ($, e) => renderSettings($, e, options))
 
   // Nothing on screen says how a closed pane comes back, so the close says it.
   on('ui.close', ($, e, next) => {

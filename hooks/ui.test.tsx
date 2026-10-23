@@ -384,14 +384,23 @@ function settings(on: On) {
   return sets
 }
 
-test('settings, on a host that lists no plugin options: says where to change them, no empty pane', async ($: Engine, on) => {
+// The Desktop app lists no plugin options in /config: the pane shows the options pennycrab was loaded with, and a
+// pick is saved through `claude plugin configure`, by the session's own executable.
+test('settings, on a host that lists no plugin options: the loaded options, a pick saved by plugin configure', { options: { router: 'explore' } }, async ($: Engine, on) => {
   on('config.list', async () => ({ value: [ROWS.at(-1)!] }) as never)
+  const runs: { argv: readonly string[]; stdin?: string }[] = []
+  on('process.run', async (_$, e) => {
+    runs.push({ argv: e.argv, stdin: e.init?.stdin })
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
   await session($, on)
   const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...SETTINGS_PANE })
-  const found = { selects: (await ui.findAll({ type: 'Select' })).length, buttons: (await ui.findAll({ type: 'Button' })).length, text: (await texts(ui)).join(' ') }
+  const selects = (await ui.findAll({ type: 'Select' })).map(e => (e as { props: { key?: unknown; value?: unknown } }).props)
+  await ui.select({ key: 'pennycrab-units', value: 'tokens' })
   await ui.unmount()
-  expect(found.selects + found.buttons).toBe(0)
-  expect(found.text).toContain('/pennycrab settings')
+  expect(selects.length).toBe(8)
+  expect(selects.find(p => p.key === 'pennycrab-router')!.value).toBe('explore')
+  expect(runs).toEqual([{ argv: ['claude', 'plugin', 'configure', 'pennycrab@pennycrab', '--values-stdin'], stdin: '{"units":"tokens"}' }])
 })
 
 test('settings: one Select per option of ours, a locked one as text; a pick sets it', async ($: Engine, on) => {

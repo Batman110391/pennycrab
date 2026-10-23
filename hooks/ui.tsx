@@ -641,10 +641,11 @@ export async function renderBand(
 // --- settings: every option of pennycrab's, changed through the engine's /config rows.
 
 export const SETTINGS = 'pennycrab-settings'
-type Field = { field: string; section: string; name: string; def: string; hint: (v: string) => string; label?: (v: string) => string }
+type Field = { field: string; section: string; name: string; def: string; values: string[]; hint: (v: string) => string; label?: (v: string) => string }
 const FIELDS: Field[] = [
   {
     field: 'router',
+    values: ['auto', 'explore', 'prudent', 'off'],
     section: 'ROUTER',
     name: 'Which subagents move to a cheaper model',
     def: 'auto',
@@ -658,6 +659,7 @@ const FIELDS: Field[] = [
   },
   {
     field: 'forecast',
+    values: ['on', 'nudge', 'off'],
     section: 'GUARD',
     name: 'Token forecast',
     def: 'on',
@@ -670,6 +672,7 @@ const FIELDS: Field[] = [
   },
   {
     field: 'budget',
+    values: ['1', '2', '5', '10', '20', '50', 'off'],
     section: 'GUARD',
     name: 'Budget per subagent',
     def: 'off',
@@ -678,6 +681,7 @@ const FIELDS: Field[] = [
   },
   {
     field: 'keepWarm',
+    values: ['auto', '30m', '1h', '2h', '4h', '8h', 'off'],
     section: 'CACHE',
     name: 'Keep the prompt cache warm while you are away',
     def: 'auto',
@@ -690,6 +694,7 @@ const FIELDS: Field[] = [
   },
   {
     field: 'units',
+    values: ['usd', 'tokens'],
     section: 'DISPLAY',
     name: 'Show spend and savings in',
     def: 'usd',
@@ -701,14 +706,15 @@ const FIELDS: Field[] = [
   },
   {
     field: 'band',
+    values: ['always', 'working', 'off'],
     section: 'DISPLAY',
     name: 'Bar above the prompt',
     def: 'always',
     hint: v => ({ always: 'The savings and the Settings button stay in reach.', working: 'Only while subagents run.', off: 'No bar: Settings is then /pennycrab settings.' })[v] ?? '',
     label: v => (v === 'working' ? 'while subagents work' : v),
   },
-  { field: 'statusLine', section: 'DISPLAY', name: 'Status line', def: 'on', hint: () => "The crabs at work and their time, above Claude's own line." },
-  { field: 'autoOpen', section: 'DISPLAY', name: 'Open the pane by itself', def: 'on', hint: () => 'When a wave of subagents starts, where the pane docks beside the chat.' },
+  { field: 'statusLine', values: ['on', 'off'], section: 'DISPLAY', name: 'Status line', def: 'on', hint: () => "The crabs at work and their time, above Claude's own line." },
+  { field: 'autoOpen', values: ['on', 'off'], section: 'DISPLAY', name: 'Open the pane by itself', def: 'on', hint: () => 'When a wave of subagents starts, where the pane docks beside the chat.' },
 ]
 // A row of ours: `<plugin>.<field>`, the plugin named as installed (pennycrab, or pennycrab@<marketplace>).
 const fieldOf = (key: string) => (/^pennycrab(@[^.]*)?\./.test(key) ? key.slice(key.indexOf('.') + 1) : undefined)
@@ -717,23 +723,47 @@ export async function openSettings($: EngineInterface) {
   await $.ui.open({ id: SETTINGS, title: 'Pennycrab settings' })
 }
 
+// The id pennycrab is installed under from its marketplace, for `claude plugin configure`.
+const INSTALLED = 'pennycrab@pennycrab'
+
 async function setOption($: EngineInterface, key: string, value: string) {
   const { deny } = await $.config.set({ key, value })
   if (deny) $.ui.toast(`Pennycrab could not change it: ${deny}`)
 }
 
-const NO_OPTIONS =
-  "This app does not hand pennycrab its options, so they cannot be changed here. In a terminal, run claude and /pennycrab settings, or /plugin configure pennycrab."
-export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>) {
+// Where /config lists no plugin options (the Desktop app), the option is saved the way `claude plugin configure`
+// saves it, with the session's own executable; the engine then reloads pennycrab with it.
+async function configure($: EngineInterface, field: string, value: string) {
+  const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) ?? 'claude'
+  const ran = await $.process
+    .run([claude, 'plugin', 'configure', INSTALLED, '--values-stdin'], { stdin: JSON.stringify({ [field]: value }) })
+    .catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+  if (ran.exitCode !== 0) $.ui.toast(`Pennycrab could not change it: ${(ran.stderr || ran.stdout).trim().split('\n')[0]}`)
+}
+
+type Row = { key: string; value: unknown; options?: readonly string[]; isLocked: boolean; save: (v: string) => Promise<void> }
+
+export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>, options: Record<string, unknown>) {
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
-  const rows = new Map((await $.config.list()).flatMap(row => (fieldOf(row.key) ? [[fieldOf(row.key)!, row] as const] : [])))
+  const listed = new Map<string, Row>(
+    (await $.config.list()).flatMap(row => (fieldOf(row.key) ? [[fieldOf(row.key)!, { ...row, save: (v: string) => setOption($, row.key, v) }] as const] : [])),
+  )
+  // The Desktop app's Code tab lists no plugin's options (checked live on 2.1.308): the values come from the options
+  // pennycrab was loaded with, and a pick is saved through `claude plugin configure`.
+  const rows: Map<string, Row> =
+    listed.size > 0
+      ? listed
+      : new Map(
+          FIELDS.map(f => [
+            f.field,
+            { key: `${INSTALLED}.${f.field}`, value: options[f.field] ?? f.def, options: f.values, isLocked: false, save: (v: string) => configure($, f.field, v) },
+          ]),
+        )
   const shown = FIELDS.filter(f => rows.has(f.field))
   const sections = [...new Set(shown.map(f => f.section))]
-  // Some hosts list no plugin's options (the Desktop app's Code tab, checked live on 2.1.308): say where they are.
-  if (shown.length === 0) return <Text wrap="wrap">{NO_OPTIONS}</Text>
   const reset = async () => {
-    for (const f of shown) if (!rows.get(f.field)!.isLocked && String(rows.get(f.field)!.value) !== f.def) await setOption($, rows.get(f.field)!.key, f.def)
+    for (const f of shown) if (!rows.get(f.field)!.isLocked && String(rows.get(f.field)!.value) !== f.def) await rows.get(f.field)!.save(f.def)
   }
   return (
     <Box flexDirection="column" gap={1}>
@@ -761,7 +791,7 @@ export async function renderSettings($: EngineInterface, e: RenderInput<'Pane'>)
                       key={`pennycrab-${f.field}`}
                       value={value}
                       options={(row.options ?? [value]).map(v => ({ value: v, label: label(v) }))}
-                      onSelect={v => void setOption($, row.key, v)}
+                      onSelect={v => void row.save(v)}
                       />
                     </Box>
                   )}
