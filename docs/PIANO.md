@@ -2,7 +2,7 @@
 
 Aggiornato il 23 ottobre 2026 · versione 0.4.0 · Claude Code 2.1.302 · branch `main`.
 
-Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **La UI della 0.4.0 è stata rifatta e approvata da Simone in Desktop** (sezione 2). Restano pochi punti aperti (2.5) e l'icona. Le sezioni 3 e 4 servono come contesto.
+Questo file è scritto per chi riprende il lavoro su pennycrab. La logica della mod è finita, misurata dal vivo, rivista da una revisione completa del codice e coperta da test. **La UI della 0.4.0 è stata rifatta e approvata da Simone in Desktop** (sezione 2). Restano pochi punti aperti (2.5). Le sezioni 3 e 4 servono come contesto.
 
 ## 1. Dove siamo
 
@@ -69,7 +69,7 @@ Risolti nella 0.4.0: contrasto nel tema scuro, animazioni che scattavano, test c
 
 Restano:
 
-1. **Icona.** `claude plugin validate` avvisa `ICON_MISSING`: serve un PNG quadrato da 512 a 2048 px in `.claude-plugin/icon.png`, fatto bene prima dell'invio al catalogo, che la prende solo la prima volta.
+1. **Icona.** Fatta: `.claude-plugin/icon.png`, 1024 px, il granchio di pennycrab sotto una pioggia di monete (scelta da Simone, G1). È un Clawd vestito: se il catalogo la rifiuta per il marchio, va vestito di più o ridisegnata.
 2. **Nota sull'abbonamento quando la cache è impostata a mano.** La nota si mostra quando `ttlSource` è `plan` o `plan-over`; se una variabile o `promptCacheTtl` sceglie la durata, l'account non si vede e la nota manca (scorciatoia segnata nel codice). Se serve, un campo nuovo nello stato.
 3. **Il `?` di un costo sconosciuto** non ha ancora la spiegazione al passaggio del mouse.
 4. **Parole dell'anello diverse per abbonamento e consumo** («ping orari, fino a 8 h»): oggi sono le stesse.
@@ -97,7 +97,7 @@ Restano:
 
 1. Installazione pulita dal marketplace: `/plugin install pennycrab --marketplace Batman110391/pennycrab` (in Desktop: **+** → Plugins → Add marketplace → Add plugin), dopo aver tolto `CLAUDE_CODE_PLUGIN_DIRS`.
 2. Un controllo automatico su GitHub che a ogni push lanci test e validazione.
-3. Un'icona disegnata da zero (non Clawd) per il catalogo dei plugin: punto 1 della 2.5.
+3. L'icona per il catalogo: fatta, vedi il punto 1 della 2.5.
 4. Da valutare: le tariffe aziendali `modelPricing`, il sovrapprezzo 1,1× per l'inferenza solo negli USA, i ping durante i comandi molto lunghi.
 
 ## 4. Misure e scoperte
