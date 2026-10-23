@@ -97,8 +97,9 @@ Never a model above yours. Left alone: a subagent type you defined, an explicit 
 
 With `delegate` on and the router on `auto` or `explore`, Claude's instructions gain a short rule (a few hundred tokens, read from the cache after the first request):
 
-- Explore runs on Haiku: when an answer needs more than 2 files Claude has not read yet (where something is done, how a flow runs, what uses a symbol), one Explore goes first, with a short report and file:line references that Claude checks before acting on them.
-- A known file, a narrow lookup or a code change stays with your model.
+- Explore runs on Haiku: when Claude starts investigating code it has not read yet (a bug, a flow, where something is done, what uses a symbol), the first exploration goes to one Explore, with a ready brief: "Find where X happens and what calls it. Answer with file:line, at most 10 lines." Claude then opens only the lines it will change or quote.
+- The investigation before a code change counts too. Claude works alone only when it writes code in files it has read, when one or two known files answer, or when the answer is in data, logs or command output.
+- **A reminder at the third file.** pennycrab counts the files Claude reads by hand in a turn (Read, and a plain `cat`, `head`, `tail` or `sed -n` of one file). At the third it adds one line beside that result, which Claude reads before its next step: send the next search to Explore. Once a turn, never in a turn that already sent an Explore, and never a block.
 
 On the Pro plan Claude Code tells Claude not to spawn subagents unless you ask, because a subagent re-reads at your model's price. That holds for subagents that write code, so pennycrab keeps the line for them and lifts it for Explore alone.
 
@@ -164,7 +165,8 @@ Nothing of it leaves your machine.
 - **The first 10 runs of each kind have no forecast.** Until then only the loop check and the spend cap, if set, hand a subagent back.
 - **A change in Settings reloads pennycrab.** The rows, tokens and savings are kept; the loop count and the steps a handed-over subagent has left to wrap up start over. A subagent that is running at that moment carries on, and its row keeps counting its tokens (checked live).
 - **Tokens assume the quota weighs models by price.** Anthropic does not document how a subscription's 5-hour and weekly limits weigh one model against another. One measurement on a Pro account agrees (see [Delegation](#delegation)); the token figures still read ≈.
-- **Claude may not follow the delegation rule.** It is an instruction, not a switch: the panel shows what was actually saved.
+- **Claude may not follow the delegation rule.** The rule and the reminder are instructions, not a switch: the panel shows what was actually saved.
+- **The reminder misses some reads.** A file read through a pipe, a glob or `head -n N` is not counted.
 - **Settings has no menus on mobile**, where the elements pennycrab draws have no menu. Change the options from a computer.
 - **A narrow terminal** (around 40 columns) has not been tuned.
 

@@ -2,7 +2,7 @@ import type { Register } from 'claude-code'
 
 import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from './cache'
 import type { KeepWarm } from './cache'
-import { composeRule, delegateOf, describeAgent } from './delegate'
+import { composeRule, delegateOf, describeAgent, onMainTurn, remindMain } from './delegate'
 import { forecastFor, forecastModeOf, keyOf, learn } from './forecast'
 import { afterTool, budgetOf, denyOf, forget, guardStep, handBackAlone, stopOf } from './guard'
 import type { Budget, Limits } from './guard'
@@ -70,7 +70,10 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) await onMainTurnStart($)
+    if (e.agentId === undefined) {
+      onMainTurn()
+      await onMainTurnStart($)
+    }
     return next(e)
   })
 
@@ -90,7 +93,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const id = e.agentId
-    if (id === undefined) return next(e)
+    if (id === undefined) return remindMain($, e, await next(e), mode, isDelegating)
     const deny = await denyOf($, id, e.tool, limits)
     if (deny !== undefined) return { deny }
     await setTool($, id, e.tool)
