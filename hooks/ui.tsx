@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, RenderElement, RenderInput } from 'claude-code'
 
 import type { Agent, Cache, Main, Tier } from '../types'
+import { keepWarmOf } from './cache'
+import type { KeepWarm, WarmPolicy } from './cache'
 import { priceBook, tierOf } from './prices'
 import { NO_CACHE, NO_MAIN, NO_SAVINGS, UI_START } from './state'
 
@@ -33,6 +35,10 @@ export const fmtUsd = (n: number): string => (n < 0 ? `−${fmtUsd(-n)}` : n > 0
 const fmtPriced = (n: number) => (priceBook() ? fmtUsd(n) : '?')
 // A row's cost; '?' once a request of it ran on a model the page does not list.
 const fmtCost = (a: Agent) => (a.isUnpriced ? '?' : fmtUsd(a.costUsd))
+// What a '?' means, shown as its tooltip on Desktop.
+const NO_PRICES = 'No prices yet: pennycrab reads them from the Anthropic pricing page once it is reached.'
+const UNLISTED = 'Unknown: a request of it ran on a model the pricing page does not list.'
+const tipped = (tip: string | undefined, markup: string) => (tip ? `<g><title>${tip}</title>${markup}</g>` : markup)
 // About an amount; "<$0.01" and "?" already say they are not exact.
 const approx = (s: string) => (/^[<?]/.test(s) ? s : `≈${s}`)
 export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${n}`)
@@ -226,7 +232,7 @@ const fmtLeft = (ms: number) => {
   return mins >= 60 ? `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`
 }
 // The cache as a ring that empties as the entry nears its lapse; nothing when the session caches nothing.
-function ringOf(c: Cache, at: number, cx: number, cy: number) {
+function ringOf(c: Cache, at: number, cx: number, cy: number, warm: WarmPolicy | undefined) {
   if (c.ttlMs === null || c.lastRequestAt === null) return ''
   const r = 30
   const circ = 2 * Math.PI * r
@@ -235,9 +241,17 @@ function ringOf(c: Cache, at: number, cx: number, cy: number) {
   const name = (s: string) => label(cx, cy + r + 18, 10.5, 'dim', s, `${SB} text-anchor="middle"`)
   const centre = (big: string, small: string) =>
     label(cx, cy + 2, 16, 'fg', big, `${B} text-anchor="middle"`) + label(cx, cy + 15, 9.5, 'dim', small, ' text-anchor="middle"')
-  // A turn renews the entry as it goes: the whole lifetime starts over once it ends.
-  if (c.isTurnOpen)
-    return base + `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="ring" stroke-width="6" stroke-dasharray="4 4"/>` + centre(fmtLeft(c.ttlMs), 'after turn') + name('Cache in use')
+  // A turn renews the entry as it goes, and keep-warm pings it within its window: no time to show, only whether
+  // keep-warm takes over. Once keep-warm stops (its window is over, or a ping was not worth it), the time counts.
+  const isKept = warm !== undefined && !c.isHalted && c.lastTurnAt !== null && at < c.lastTurnAt + warm.windowMs
+  if (c.isTurnOpen || (isKept && left > 0))
+    return (
+      base +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" class="ring" stroke-width="6"/>` +
+      label(cx, cy + 5, 15, 'fg', warm ? 'on' : 'off', `${B} text-anchor="middle"`) +
+      name(c.isTurnOpen ? 'Cache in use' : 'Cache warm') +
+      label(cx, cy + r + 32, 9.5, 'dim', warm ? 'Keep-warm enabled' : 'Keep-warm off', ' text-anchor="middle"')
+    )
   if (left <= 0) return base + label(cx, cy + 5, 18, 'faint', '—', `${B} text-anchor="middle"`) + name('Cache expired')
   const arc = (circ * left) / c.ttlMs
   return (
@@ -251,7 +265,7 @@ function ringOf(c: Cache, at: number, cx: number, cy: number) {
 // The pane's head: one big number for the savings, what was spent beside what it would have been, the cache ring
 // and the main thread's context.
 const HERO_H = 118
-function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, mainPct: number) {
+function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, mainPct: number, warm: WarmPolicy | undefined) {
   const spent = approx(fmtUsd(cost))
   const would = priceBook() ? fmtUsd(cost + saved) : '?'
   const hasRing = c.ttlMs !== null && c.lastRequestAt !== null
@@ -263,11 +277,14 @@ function heroSvg(w: number, cost: number, saved: number, c: Cache, at: number, m
     HERO_H,
     `<rect class="card" x="0" y="0" width="${w}" height="${HERO_H}" rx="12"/>` +
       label(16, 26, 10, 'dim', 'SAVED THIS SESSION', SB) +
-      label(16, 62, 34, saved > 0 ? 'good' : saved < 0 ? 'bad' : 'fg', fmtPriced(saved), B) +
-      label(16, 82, 11, 'dim', clip(saved === 0 ? `spent ${spent}` : fitOf([`spent ${spent} · would have been ${would}`, `spent ${spent}, not ${would}`], 11, room), 11, room)) +
+      tipped(
+        priceBook() ? undefined : NO_PRICES,
+        label(16, 62, 34, saved > 0 ? 'good' : saved < 0 ? 'bad' : 'fg', fmtPriced(saved), B) +
+          label(16, 82, 11, 'dim', clip(saved === 0 ? `spent ${spent}` : fitOf([`spent ${spent} · would have been ${would}`, `spent ${spent}, not ${would}`], 11, room), 11, room)),
+      ) +
       label(16, 104, 10.5, 'dim', `Main context ${mainPct}%`) +
       `<rect class="track" x="${bx}" y="99" width="${bw}" height="5" rx="2.5"/><rect class="fg" fill-opacity=".55" x="${bx}" y="99" width="${Math.round((bw * mainPct) / 100)}" height="5" rx="2.5"/>` +
-      (hasRing ? ringOf(c, at, w - 54, 50) : ''),
+      (hasRing ? ringOf(c, at, w - 54, 50, warm) : ''),
   )
 }
 
@@ -364,7 +381,7 @@ function rowSvg(w: number, a: Agent, at: number) {
     `<rect class="card" x="0" y="2" width="${w}" height="${ROW_H - 4}" rx="10"/>` +
       crab(10, 18, costumeOf(a), isLive(a), 2.4) +
       label(x, 24, 13, 'fg', clip(a.description || a.type, 13, tw - widthOf(cost, 13) - 12), SB) +
-      label(w - 14, 24, 13, a.isUnpriced ? 'faint' : 'fg', cost, `${B} text-anchor="end"`) +
+      tipped(a.isUnpriced ? UNLISTED : undefined, label(w - 14, 24, 13, a.isUnpriced ? 'faint' : 'fg', cost, `${B} text-anchor="end"`)) +
       chips +
       label(w - 14, 45, 10.5, 'dim', figures, ' text-anchor="end"') +
       `<rect class="track" x="${x}" y="57" width="${tw}" height="4" rx="2"/><rect x="${x}" y="57" width="${Math.round((tw * ctx) / 100)}" height="4" rx="2" fill="${a.trip ? WARN : COLOR[a.tier]}"/>`,
@@ -431,7 +448,7 @@ async function view($: EngineInterface) {
 }
 const pctOf = (m: Main) => (m.contextWindow ? Math.round((m.contextTokens / m.contextWindow) * 100) : 0)
 
-export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
+export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>, display: Display) {
   noteViewport(e)
   const r = $.ui.resolve(e)
   const { Box, Text, Button } = r
@@ -458,13 +475,13 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       )
     }
     const row = (a: Agent) => (
-      <Svg key={a.id} source={rowSvg(w, a, at)} alt={`${a.description}: ${NAME[a.tier]}, ${a.status}, context ${ctxOf(a)}%`} width={w} height={ROW_H} />
+      <Svg key={a.id} source={rowSvg(w, a, at)} isInteractive={a.isUnpriced} alt={`${a.description}: ${NAME[a.tier]}, ${a.status}, context ${ctxOf(a)}%`} width={w} height={ROW_H} />
     )
     const section = (name: string, n: number) => <Svg key={`section-${name}`} source={sectionSvg(w, name, n)} alt={`${name} ${n}`} width={w} height={SECTION_H} />
     const ping = pingNote(c)
     return (
       <Box flexDirection="column">
-        <Svg source={heroSvg(w, m.costUsd, s.usd, c, at, mainPct)} alt={`${summary}${cacheText ? ` · ${cacheText}` : ''}`} width={w} height={HERO_H} />
+        <Svg source={heroSvg(w, m.costUsd, s.usd, c, at, mainPct, display.warm)} isInteractive={!priceBook()} alt={`${summary}${cacheText ? ` · ${cacheText}` : ''}`} width={w} height={HERO_H} />
         {ping !== undefined && <Svg key="ping" {...noteOf(w, ping)} alt={ping} width={w} />}
         {isPlan(c) && <Svg key="plan" {...noteOf(w, PLAN_NOTE)} alt={PLAN_NOTE} width={w} />}
         {collapse}
@@ -526,11 +543,12 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
 
 // What the person chose to see: the band always, while subagents work or never; the status line; the pane opening
 // by itself. They are options, so a change reloads pennycrab with the new ones.
-export type Display = { band: 'always' | 'working' | 'off'; isStatusLine: boolean; isAutoOpen: boolean }
+export type Display = { band: 'always' | 'working' | 'off'; isStatusLine: boolean; isAutoOpen: boolean; warm: WarmPolicy | undefined }
 export const displayOf = (o: Record<string, unknown>): Display => ({
   band: o.band === 'working' || o.band === 'off' ? o.band : 'always',
   isStatusLine: o.statusLine !== 'off',
   isAutoOpen: o.autoOpen !== 'off',
+  warm: keepWarmOf(o.keepWarm as KeepWarm | undefined),
 })
 
 // The band above the prompt: crabs, who is working, what was spent and saved, and the Pane and Settings buttons on

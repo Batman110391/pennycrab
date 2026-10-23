@@ -189,3 +189,25 @@ test('an Explore of a Fable session would run on Opus without pennycrab: its sav
   expect(texts).toContain('  Haiku · low · ↓ from Opus')
   expect(texts.some(t => t.includes('saved $4.38'))).toBe(true)
 })
+
+// On Desktop a '?' explains itself: the drawing that shows it is interactive, with a <title> tooltip on the figure.
+async function deskSvgs($: Engine) {
+  const ui = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', component: 'Pane', requestId: 'pennycrab', props: { title: 'Pennycrab', isFocused: false, bodyColumns: 80, placement: 'dock' } as never })
+  const svgs = (await ui.findAll({ type: 'Svg' })).map(e => (e as unknown as { props: { source: string; isInteractive?: boolean } }).props)
+  await ui.unmount()
+  return svgs
+}
+
+test('Desktop: a row on an unlisted model says why its cost is ?, on hover', async ($: Engine, on) => {
+  const { clock } = world(on, { fetchedAt: T0, models: MODELS }, 'down')
+  await rowCost($, clock, 'my-gateway-model')
+  const tipped = (await deskSvgs($)).filter(p => p.isInteractive && p.source.includes('<title>'))
+  expect(tipped.map(p => /<title>([^<]*)/.exec(p.source)![1])).toEqual(['Unknown: a request of it ran on a model the pricing page does not list.'])
+})
+
+test('Desktop: with no prices yet, the head says why it reads ?, on hover', async ($: Engine, on) => {
+  const { clock } = world(on, undefined, 'down')
+  await rowCost($, clock)
+  const tips = (await deskSvgs($)).filter(p => p.isInteractive).map(p => /<title>([^<]*)/.exec(p.source)?.[1])
+  expect(tips).toContain('No prices yet: pennycrab reads them from the Anthropic pricing page once it is reached.')
+})

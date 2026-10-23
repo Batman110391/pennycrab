@@ -364,3 +364,32 @@ test('the cache line ends on Cache expired whenever the last redraw landed', { o
   await clock.advance(10 * MIN)
   expect(await paneText($, /^Cache /)).toEqual(['Cache expired'])
 })
+
+// While a turn runs the Desktop ring shows no time, which the turn renews: only whether keep-warm takes over after it.
+for (const [mode, says] of [['auto', ['on', 'Keep-warm enabled']], ['off', ['off', 'Keep-warm off']]] as const) {
+  test(`Desktop ring in use, keep-warm ${mode}: ${says.join(', ')}`, { options: { keepWarm: mode } }, async ($: Engine, on) => {
+    engine(on)
+    await start($)
+    await turn($, 'm1')
+    await $.turn.start({ text: 'go', turnId: 'm2' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const hero = String(((await ui.findAll({ type: 'Svg' }))[0] as unknown as { props: { source: string } }).props.source)
+    await ui.unmount()
+    for (const s of ['Cache in use', ...says]) expect(hero).toContain(`>${s}<`)
+    expect(hero).not.toContain('after turn')
+  })
+}
+
+// At rest, keep-warm's window holds the entry: the ring shows that, not a time; with keep-warm off the time counts.
+for (const [mode, says, not] of [['auto', ['Cache warm', 'on', 'Keep-warm enabled'], 'left'], ['off', ['Cache warm', 'left'], 'Keep-warm']] as const) {
+  test(`Desktop ring at rest, keep-warm ${mode}: ${says.join(', ')}`, { options: { keepWarm: mode } }, async ($: Engine, on) => {
+    engine(on)
+    await start($)
+    await turn($, 'm1')
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const hero = String(((await ui.findAll({ type: 'Svg' }))[0] as unknown as { props: { source: string } }).props.source)
+    await ui.unmount()
+    for (const s of says) expect(hero).toContain(`>${s}<`)
+    expect(hero).not.toContain(`>${not}`)
+  })
+}
