@@ -241,7 +241,7 @@ test('after the first turn one toast says what pennycrab chose for the account; 
   await turn($, 'm1')
   await turn($, 'm2')
   expect(toasts).toEqual([
-    'pennycrab is set for your Claude subscription: 1-hour cache, one ping an hour while you are away (up to 8 h) · Explore on Haiku, general-purpose on Sonnet · $2.00 cap per subagent. /plugin configure pennycrab to change it.',
+    'pennycrab is set for your Claude subscription: 1-hour cache, one ping an hour while you are away (up to 8 h) · Explore on Haiku, general-purpose on Sonnet · token forecast: a nudge, then a handover past twice it · no spend cap. ⚙ Settings on its bar to change it.',
   ])
 })
 

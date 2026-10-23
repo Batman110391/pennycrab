@@ -33,16 +33,24 @@ async function patch($: EngineInterface, id: string, fn: (a: Agent) => Agent) {
   await update($, agents, list => list.map(a => (a.id === id ? fn(a) : a)))
 }
 
-// A new row; for a resume, the agent's own row running again, its spend and handover kept so its budget does
-// not start over. True when it starts a wave: no other subagent was running.
-export async function addAgent($: EngineInterface, e: AgentSpawnInput, id: string, model: string, route: Route | undefined) {
+// A new row, with the forecast its kind of run has; for a resume, the agent's own row running again, its spend and
+// handover kept so its budget does not start over, its tokens counted afresh with no forecast: what is left of a
+// task is not a run like any other. True when it starts a wave: no other subagent was running.
+export async function addAgent(
+  $: EngineInterface,
+  e: AgentSpawnInput,
+  id: string,
+  model: string,
+  route: Route | undefined,
+  plan?: { key: string; forecast: number | undefined },
+) {
   const at = await $.clock.now()
   let isFirst = false
   await update($, agents, list => {
     isFirst = !list.some(a => a.endedAt === undefined && a.id !== id)
     const own = e.resume ? list.find(a => a.id === id) : undefined
     const row: Agent = own
-      ? { ...own, model, tier: tierOf(model), status: 'running', endedAt: undefined, currentTool: undefined }
+      ? { ...own, model, tier: tierOf(model), status: 'running', endedAt: undefined, currentTool: undefined, tokens: 0, forecast: undefined, isNudged: undefined, isResumed: true }
       : {
           id,
           description: e.description,
@@ -58,6 +66,9 @@ export async function addAgent($: EngineInterface, e: AgentSpawnInput, id: strin
           steps: 0,
           contextTokens: 0,
           contextWindow: WINDOW,
+          tokens: 0,
+          forecast: plan?.forecast,
+          forecastKey: plan?.key,
           costUsd: 0,
           savedUsd: 0,
         }
@@ -88,6 +99,7 @@ export async function recordStep($: EngineInterface, agentId: string | undefined
     endedAt: undefined,
     steps: a.steps + 1,
     contextTokens: promptTokens(u) + u.output_tokens,
+    tokens: (a.tokens ?? 0) + promptTokens(u) + u.output_tokens,
     costUsd: a.costUsd + (cost ?? 0),
     isUnpriced: a.isUnpriced || cost === undefined || undefined,
     savedUsd: a.savedUsd + saved,
@@ -110,4 +122,5 @@ export async function finish($: EngineInterface, id: string, reason: string) {
   // The guard's handover outlives the turn's own reason.
   await patch($, id, a => ({ ...a, status: a.status === 'handover' ? a.status : statusOf(reason), currentTool: undefined, endedAt: now }))
   await update($, agents, prune)
+  return (await read($, agents)).find(a => a.id === id)
 }

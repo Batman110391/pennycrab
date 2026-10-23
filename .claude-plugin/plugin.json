@@ -1,6 +1,6 @@
 {
   "name": "pennycrab",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The crab that counts your pennies: routes subagents to cheaper models, stops runaway ones, keeps the prompt cache warm, and shows it all in a live pane",
   "author": {
     "name": "Batman110391"
@@ -33,13 +33,26 @@
       "title": "Subagent budget (USD)",
       "description": "The most one subagent may spend before the guard asks it to hand back what it found, then stops it if it keeps going. off: no guard.",
       "options": [
-        "0.50",
         "1",
         "2",
         "5",
+        "10",
+        "20",
+        "50",
         "off"
       ],
-      "default": "2"
+      "default": "off"
+    },
+    "forecast": {
+      "type": "string",
+      "title": "Token forecast",
+      "description": "on: past what runs like it usually take, a subagent is nudged to wrap up; past twice that, it hands back what it found. nudge: the nudge only. off: neither. Learned from your own runs, once there are ten of a kind.",
+      "options": [
+        "on",
+        "nudge",
+        "off"
+      ],
+      "default": "on"
     },
     "keepWarm": {
       "type": "string",

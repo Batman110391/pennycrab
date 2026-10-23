@@ -2,16 +2,17 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Cache } from '../types'
 import type { WarmPolicy } from './cache'
+import type { ForecastMode } from './forecast'
 import type { RouterMode } from './router'
 
-type Choice = { router: RouterMode; budgetUsd: number | undefined; warm: WarmPolicy | undefined }
+type Choice = { router: RouterMode; budgetUsd: number | undefined; forecast: ForecastMode; warm: WarmPolicy | undefined }
 const STORE_KEY = 'setup'
 
 const hours = (ms: number) => (ms >= 3600_000 ? `${ms / 3600_000} h` : `${ms / 60_000} min`)
 
 // What pennycrab chose for this account, in one line: the cache it found and how it keeps it warm, where the
-// built-in subagents run, and the spend cap.
-export function setupLine(c: Pick<Cache, 'ttlMs' | 'ttlSource'>, { router, budgetUsd, warm }: Choice) {
+// built-in subagents run, what the forecast does and the spend cap.
+export function setupLine(c: Pick<Cache, 'ttlMs' | 'ttlSource'>, { router, budgetUsd, forecast, warm }: Choice) {
   const isHour = c.ttlMs !== null && c.ttlMs >= 3600_000
   const WHO: Record<Cache['ttlSource'], string> = {
     plan: 'your Claude subscription',
@@ -34,8 +35,9 @@ export function setupLine(c: Pick<Cache, 'ttlMs' | 'ttlSource'>, { router, budge
             : '5-minute cache, pings while you are away as long as they pay for themselves'
           : `${isHour ? '1-hour' : '5-minute'} cache, kept warm ${hours(warm.windowMs)} after your last turn`
   const route = router === 'auto' ? 'Explore on Haiku, general-purpose on Sonnet' : router === 'explore' ? 'Explore on Haiku, general-purpose on your model' : router === 'prudent' ? 'Explore and general-purpose on Sonnet' : 'router off'
+  const guard = forecast === 'on' ? 'token forecast: a nudge, then a handover past twice it' : forecast === 'nudge' ? 'token forecast: a nudge only' : 'token forecast off'
   const cap = budgetUsd === undefined ? 'no spend cap' : `$${budgetUsd.toFixed(2)} cap per subagent`
-  return `pennycrab is set for ${who}: ${cache} · ${route} · ${cap}. /plugin configure pennycrab to change it.`
+  return `pennycrab is set for ${who}: ${cache} · ${route} · ${guard} · ${cap}. ⚙ Settings on its bar to change it.`
 }
 
 // After a turn of the person's: the first time this choice applies (a new install, or the account, its cache or

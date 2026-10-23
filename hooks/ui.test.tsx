@@ -67,7 +67,7 @@ test('desktop: the pane draws its head, a section and one row as Svg, the band o
   // The description reaches the markup escaped, and the row's figures stay apart once SVG folds its spaces.
   expect(markup).toContain('Find the &#60;auth&#62; flow')
   expect(markup).not.toContain('<auth>')
-  expect(markup).toContain('ctx 0% · 0 · 0s')
+  expect(markup).toContain('ctx 0% · 0 tok · 0s')
   expect(markup).toContain('≈$0.00')
   const band = await $.ui.mount({ plugin: 'pennycrab', surface: 'desktop', ...BAND })
   const bandSvg = (await band.findAll({ type: 'Svg' })).length
@@ -365,7 +365,7 @@ test('autoOpen "off": a wave of subagents does not open the pane', { options: { 
 // The rows /config lists for pennycrab, as installed from its marketplace; one is set by a policy.
 const ROWS = [
   { key: 'pennycrab@pennycrab.router', value: 'auto', options: ['auto', 'explore', 'prudent', 'off'], isLocked: false },
-  { key: 'pennycrab@pennycrab.budget', value: '5', options: ['0.50', '1', '2', '5', 'off'], isLocked: true },
+  { key: 'pennycrab@pennycrab.budget', value: '5', options: ['1', '2', '5', '10', '20', '50', 'off'], isLocked: true },
   { key: 'pennycrab@pennycrab.keepWarm', value: '1h', options: ['auto', '30m', '1h', '2h', '4h', '8h', 'off'], isLocked: false },
   { key: 'pennycrab@pennycrab.band', value: 'always', options: ['always', 'working', 'off'], isLocked: false },
   { key: 'pennycrab@pennycrab.statusLine', value: 'on', options: ['on', 'off'], isLocked: false },

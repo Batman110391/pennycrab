@@ -19,33 +19,44 @@ const row = (over: Partial<Agent>): Agent => ({
   steps: 0,
   contextTokens: 0,
   contextWindow: 1_000_000,
+  tokens: 0,
   costUsd: 0,
   savedUsd: 0,
   ...over,
 })
 
-test('the guard trips on the budget alone: a Haiku subagent past its long-prompt line still costs less than on any other model', () => {
-  expect(tripOf(row({ costUsd: 1.99 }), 2)).toBeUndefined()
-  expect(tripOf(row({ costUsd: 2 }), 2)).toBe('budget')
-  expect(tripOf(row({ tier: 'haiku', model: 'claude-haiku-5-5', contextTokens: 400_000, costUsd: 0.3 }), 2)).toBeUndefined()
+const CAP = { budgetUsd: 2, forecast: 'off' } as const
+
+test('the budget trips on spend alone: a Haiku subagent past its long-prompt line still costs less than on any other model', () => {
+  expect(tripOf(row({ costUsd: 1.99 }), CAP)).toBeUndefined()
+  expect(tripOf(row({ costUsd: 2 }), CAP)).toBe('budget')
+  expect(tripOf(row({ tier: 'haiku', model: 'claude-haiku-5-5', contextTokens: 400_000, costUsd: 0.3 }), CAP)).toBeUndefined()
 })
 
-test('the budget option reads as dollars, off as no guard, unset as $2', () => {
-  expect([budgetOf('0.50'), budgetOf('5'), budgetOf(undefined), budgetOf('off')]).toEqual([0.5, 5, 2, undefined])
+test('the forecast trips at twice it, only when on and only for a run that has one', () => {
+  const on = { budgetUsd: undefined, forecast: 'on' } as const
+  expect(tripOf(row({ tokens: 1_199_999, forecast: 600_000 }), on)).toBeUndefined()
+  expect(tripOf(row({ tokens: 1_200_000, forecast: 600_000 }), on)).toBe('forecast')
+  expect(tripOf(row({ tokens: 1_200_000, forecast: 600_000 }), { ...on, forecast: 'nudge' })).toBeUndefined()
+  expect(tripOf(row({ tokens: 9_000_000 }), on)).toBeUndefined()
 })
 
-// 1M tokens written to the 5-minute cache on Sonnet: $2.50, past the default budget in one step.
+test('the budget option reads as dollars, off as no cap, unset as off', () => {
+  expect([budgetOf('1'), budgetOf('50'), budgetOf(undefined), budgetOf('off')]).toEqual([1, 50, undefined, undefined])
+})
+
+// 1M tokens written to the 5-minute cache on Sonnet: $2.50, past a $2 budget in one step.
 const COSTLY: TurnUsage = { model: 'claude-sonnet-5-5', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
 
 // The test's hooks stand for the engine: an Opus session whose Explore runs on Sonnet as a1, each request
 // costing COSTLY and asking for a tool (or, `isFinal`, answering), every tool answering 'ok', and the prices
 // of the pricing page already kept.
-async function session($: Engine, on: On, isFinal = false, isUsageDown = false) {
+async function session($: Engine, on: On, isFinal = false, isUsageDown = false, history: Record<string, number[]> = {}) {
   const sent = { steps: 0, tools: 0, toasts: [] as string[] }
   const T0 = Date.parse('2026-10-22T10:00:00Z')
   mock.env(on, {})
   mock.clock(on, { now: T0 })
-  mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) } })
+  mock.store(on, { prices: { fetchedAt: T0, models: parsePricing(PRICING_PAGE) }, history })
   on('agent.spawn', async (_$, e) => ({ model: e.model ?? e.parentModel, agentId: 'a1' }) as never)
   on('command.register', async () => ({ value: undefined }) as never)
   on('ui.open', async () => ({ value: { isPlaced: true } }) as never)
@@ -93,7 +104,7 @@ async function paneTexts($: Engine) {
   return texts
 }
 
-test('past its budget a subagent is refused its tools, then stopped if it keeps calling them', async ($: Engine, on) => {
+test('past its budget a subagent is refused its tools, then stopped if it keeps calling them', { options: { budget: '2' } }, async ($: Engine, on) => {
   const sent = await session($, on)
   await step($, 0)
   const tool = await $.tool.call({ tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' })
@@ -122,7 +133,7 @@ test('off: the guard never steps in', { options: { budget: 'off' } }, async ($: 
   expect({ steps: sent.steps, tools: sent.tools, toasts: sent.toasts.length }).toEqual({ steps: 4, tools: 1, toasts: 0 })
 })
 
-test('a handed-over subagent that ended and is resumed gets its wrap-up steps again', async ($: Engine, on) => {
+test('a handed-over subagent that ended and is resumed gets its wrap-up steps again', { options: { budget: '2' } }, async ($: Engine, on) => {
   const sent = await session($, on)
   for (const i of [0, 1, 2]) await step($, i)
   await $.turn.complete({ reason: 'answer', answer: 'Partial findings', durationMs: 1, isAborted: false, turnId: 'turn1', agentId: 'a1' })
@@ -131,7 +142,7 @@ test('a handed-over subagent that ended and is resumed gets its wrap-up steps ag
   expect(sent.steps).toBe(4)
 })
 
-test('a subagent whose final answer crosses its budget had finished by itself: no handover, no toast', async ($: Engine, on) => {
+test('a subagent whose final answer crosses its budget had finished by itself: no handover, no toast', { options: { budget: '2' } }, async ($: Engine, on) => {
   const sent = await session($, on, true)
   await step($, 0)
   const tool = await $.tool.call({ tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' })
@@ -141,7 +152,7 @@ test('a subagent whose final answer crosses its budget had finished by itself: n
   expect({ deny: tool.deny, toasts: sent.toasts.length, guard }).toEqual({ deny: undefined, toasts: 0, guard: 0 })
 })
 
-test('a subagent resumed after its handover keeps its spend, and is handed over again at its first tool call', async ($: Engine, on) => {
+test('a subagent resumed after its handover keeps its spend, and is handed over again at its first tool call', { options: { budget: '2' } }, async ($: Engine, on) => {
   const sent = await session($, on)
   await step($, 0)
   await $.turn.complete({ reason: 'answer', answer: 'Partial findings', durationMs: 1, isAborted: false, turnId: 'turn1', agentId: 'a1' })
@@ -167,4 +178,81 @@ test('a hook that fails after the model answered is skipped: the step stays as t
   const result = await step($, 0, chunks)
   expect(chunks).toEqual([{ kind: 'stop', stopReason: 'tool_use', usage: COSTLY }])
   expect(result.toolUses.length).toBe(1)
+})
+
+// Ten finished Explore runs on Haiku of 400K tokens each: a forecast of 600K. Each COSTLY step is 1M tokens.
+const RUNS = { 'Explore · haiku': Array(10).fill(400_000) }
+const read = { tool: 'Read', file_path: 'src/auth.ts', agentId: 'a1' } as const
+const notesOf = (r: unknown) => ((r as { context?: string[] }).context ?? []).join(' ')
+
+test('past its forecast a subagent is nudged once; past twice it, handed over with its numbers', async ($: Engine, on) => {
+  const sent = await session($, on, false, false, RUNS)
+  await step($, 0)
+  const first = await $.tool.call(read)
+  const second = await $.tool.call({ ...read, file_path: 'src/b.ts' })
+  await step($, 1)
+  const tool = await $.tool.call(read)
+  const why = (await paneTexts($)).filter(t => /over forecast/.test(t)).length
+  expect(notesOf(first)).toContain('usually finish within 400K')
+  expect(notesOf(second)).toBe('')
+  expect(tool.deny).toContain('Stopped by pennycrab: it used 2.0M tokens, past twice its forecast of 600K')
+  expect(sent.toasts).toEqual(['Pennycrab handed over "Find the auth flow": it used 2.0M tokens, past twice its forecast of 600K.'])
+  expect(why).toBe(1)
+})
+
+test('forecast "nudge": the note, never a handover', { options: { forecast: 'nudge' } }, async ($: Engine, on) => {
+  const sent = await session($, on, false, false, RUNS)
+  await step($, 0)
+  const first = await $.tool.call(read)
+  for (const i of [1, 2, 3]) await step($, i)
+  const later = await $.tool.call({ ...read, file_path: 'src/b.ts' })
+  expect(notesOf(first)).toContain('wrap up')
+  expect({ deny: later.deny, toasts: sent.toasts.length }).toEqual({ deny: undefined, toasts: 0 })
+})
+
+test('forecast "off": no note, no handover', { options: { forecast: 'off' } }, async ($: Engine, on) => {
+  await session($, on, false, false, RUNS)
+  for (const i of [0, 1, 2]) await step($, i)
+  const calls = []
+  for (let i = 0; i < 6; i++) calls.push(await $.tool.call(read))
+  expect(calls.map(c => [c.deny, notesOf(c)])).toEqual(Array(6).fill([undefined, '']))
+})
+
+test('fewer than ten runs of its kind: no forecast, so no note however many tokens', async ($: Engine, on) => {
+  await session($, on, false, false, { 'Explore · haiku': Array(9).fill(400_000) })
+  for (const i of [0, 1, 2]) await step($, i)
+  const tool = await $.tool.call(read)
+  expect([tool.deny, notesOf(tool)]).toEqual([undefined, ''])
+})
+
+test('the same call with the same result: a note at the third, a handover at the fifth; another call in between starts over', async ($: Engine, on) => {
+  const sent = await session($, on)
+  const calls = []
+  for (const f of ['a', 'a', 'b', 'a', 'a', 'a', 'a', 'a', 'a']) calls.push(await $.tool.call({ ...read, file_path: f }))
+  const notes = calls.map(c => (notesOf(c).includes('same call') ? 'note' : c.deny ? 'deny' : '-'))
+  expect(notes).toEqual(['-', '-', '-', '-', '-', 'note', '-', '-', 'deny'])
+  expect(calls[8]!.deny).toContain('the same tool call with the same result 5 times in a row')
+  expect(sent.toasts.length).toBe(1)
+})
+
+// Nine runs of its kind: the tenth, once it answers, makes the next spawn's forecast.
+const NINE = { 'Explore · haiku': Array(9).fill(400_000) }
+const again = ($: Engine) =>
+  $.agent.spawn({ tool_use_id: 't2', prompt: 'p', description: 'Find the auth flow', subagentType: 'Explore', parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+const tokText = async ($: Engine) => (await paneTexts($)).filter(t => / tok · /.test(t)).join(' ')
+
+test('a run that answers joins the history of its kind: the next run like it has a forecast', async ($: Engine, on) => {
+  await session($, on, true, false, NINE)
+  await step($, 0)
+  await $.turn.complete({ reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 'turn1', agentId: 'a1' })
+  await again($)
+  expect(await tokText($)).toContain('0 / 600K tok')
+})
+
+test('a run handed over stays out of the history', { options: { budget: '2' } }, async ($: Engine, on) => {
+  await session($, on, false, false, NINE)
+  for (const i of [0, 1]) await step($, i)
+  await $.turn.complete({ reason: 'answer', answer: 'Stopped by pennycrab', durationMs: 1, isAborted: false, turnId: 'turn1', agentId: 'a1' })
+  await again($)
+  expect(await tokText($)).not.toContain(' / ')
 })

@@ -2,9 +2,10 @@ import type { Register } from 'claude-code'
 
 import { keepWarm, keepWarmOf, onMainStep, onMainTurnEnd, onMainTurnStart } from './cache'
 import type { KeepWarm } from './cache'
-import { answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
-import type { Budget } from './guard'
-import { loadStoredPrices, refreshPrices } from './prices'
+import { forecastFor, forecastModeOf, keyOf, learn } from './forecast'
+import { afterTool, answerAlone, budgetOf, denyOf, forget, guardStep, stopOf } from './guard'
+import type { Budget, Limits } from './guard'
+import { loadStoredPrices, refreshPrices, tierOf } from './prices'
 import { spawnRouted, withRoutedEffort } from './router'
 import type { RouterMode } from './router'
 import { announceSetup } from './setup'
@@ -16,10 +17,14 @@ import { displayOf, onSpawnUi, openSettings, renderBand, renderPane, renderSetti
 export const register: Register = (on, options) => {
   const mode = (options.router as RouterMode | undefined) ?? 'auto'
   const budgetUsd = budgetOf(options.budget as Budget | undefined)
+  const limits: Limits = { budgetUsd, forecast: forecastModeOf(options.forecast) }
+  // The project a run's history is kept under; session.start sets it again after a reload.
+  let project = ''
   const warm = keepWarmOf(options.keepWarm as KeepWarm | undefined)
   const display = displayOf(options)
 
   on('session.start', async ($, e, next) => {
+    project = e.cwd
     await $.command.register({ name: 'pennycrab', description: 'Show or hide the pennycrab pane: your subagents, their models, context and cost. /pennycrab settings: its options' })
     await loadStoredPrices($)
     // The page again every ten minutes while the kept prices are a day old or missing (no network at the start).
@@ -50,7 +55,11 @@ export const register: Register = (on, options) => {
 
   on('agent.spawn', async ($, e, next) => {
     const { started, route } = await spawnRouted($, e, next, mode)
-    if (started.agentId !== undefined) await onSpawnUi($, await addAgent($, e, started.agentId, started.model, route), display)
+    if (started.agentId !== undefined) {
+      const key = keyOf(e.subagentType, tierOf(started.model), e.fork)
+      const forecast = limits.forecast === 'off' || e.resume || e.isTeammate ? undefined : await forecastFor($, project, key)
+      await onSpawnUi($, await addAgent($, e, started.agentId, started.model, route, { key, forecast }), display)
+    }
     return started
   }).catch(($, e, next) => next(e))
 
@@ -60,7 +69,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const stop = await stopOf($, e.agentId, budgetUsd)
+    const stop = await stopOf($, e.agentId, limits)
     if (stop !== undefined) return yield* answerAlone(e, stop)
     // The main thread's cache entry lives from the request's start, not from the end of its reply.
     const sentAt = e.agentId === undefined ? await $.clock.now() : 0
@@ -68,7 +77,7 @@ export const register: Register = (on, options) => {
     if (result.usage) {
       await recordStep($, e.agentId, e.model, result.usage)
       if (e.agentId === undefined) await onMainStep($, e.model, result.usage, sentAt)
-      await guardStep($, e.agentId, budgetUsd, result.toolUses.length > 0)
+      await guardStep($, e.agentId, limits, result.toolUses.length > 0)
     }
     return result
   })
@@ -76,20 +85,20 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const id = e.agentId
     if (id === undefined) return next(e)
-    const deny = await denyOf($, id, budgetUsd)
+    const deny = await denyOf($, id, limits)
     if (deny !== undefined) return { deny }
     await setTool($, id, e.tool)
     const ran = await next(e)
     await setTool($, id, undefined)
-    return ran
+    return afterTool($, id, e, ran, limits)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
-      await finish($, e.agentId, e.reason)
+      await learn($, project, await finish($, e.agentId, e.reason), e.reason)
       forget(e.agentId)
     } else {
-      await announceSetup($, await onMainTurnEnd($), { router: mode, budgetUsd, warm })
+      await announceSetup($, await onMainTurnEnd($), { router: mode, budgetUsd, forecast: limits.forecast, warm })
     }
     return next(e)
   })

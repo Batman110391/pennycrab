@@ -45,7 +45,10 @@ const isLive = (a: Agent) => a.endedAt === undefined
 const isGuarded = (a: Agent) => a.status === 'handover' && isLive(a)
 const ctxOf = (a: Agent) => (a.contextWindow ? Math.min(100, Math.round((a.contextTokens / a.contextWindow) * 100)) : 0)
 const elapsed = (a: Agent, at: number) => (a.endedAt ?? Math.max(at, a.startedAt)) - a.startedAt
-const tripLabel = (a: Agent) => (a.trip === 'budget' ? '⚑ over budget' : undefined)
+const TRIP: Record<NonNullable<Agent['trip']>, string> = { budget: '⚑ over budget', forecast: '⚑ over forecast', loop: '⚑ loop' }
+const tripLabel = (a: Agent) => (a.trip ? TRIP[a.trip] : undefined)
+// The run's tokens, against its forecast when it has one.
+const tokOf = (a: Agent) => `${fmtTokens(a.tokens ?? 0)}${a.forecast === undefined ? '' : ` / ${fmtTokens(a.forecast)}`} tok`
 const meta = (a: Agent) =>
   [tripLabel(a), a.effort, a.routedFrom && `↓ from ${NAME[tierOf(a.routedFrom)]}`, a.currentTool && `▶ ${a.currentTool}`].filter(Boolean).join(' · ')
 
@@ -260,7 +263,7 @@ const PLAN_NOTE = 'ⓘ Subscription: dollars are list-price equivalents, counted
 const EMPTY_H = 150
 function emptySvg(w: number) {
   const x = w < 360 ? 16 : 100
-  const items = ['Sends Explore and helper subagents to a cheaper model', 'Hands back a subagent that passes its budget', 'Keeps the prompt cache warm while you are away']
+  const items = ['Sends Explore and helper subagents to a cheaper model', 'Hands back a subagent that runs far past its forecast', 'Keeps the prompt cache warm while you are away']
   return svg(
     w,
     EMPTY_H,
@@ -308,7 +311,7 @@ function rowSvg(w: number, a: Agent, at: number) {
   const tw = w - x - 14
   const ctx = ctxOf(a)
   const cost = `≈${fmtCost(a)}`
-  const figures = `ctx ${ctx}% · ${fmtTokens(a.contextTokens)} · ${fmtTime(elapsed(a, at))}`
+  const figures = `ctx ${ctx}% · ${tokOf(a)} · ${fmtTime(elapsed(a, at))}`
   const chipsEnd = w - 14 - widthOf(figures, 10.5) - 10
   let cx = x
   let chips = ''
@@ -452,7 +455,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Text wrap="truncate-end">
         {'  '}
         <Text color={isGuarded(a) ? WARN : COLOR[a.tier]}>{textBar(ctxOf(a), barW)}</Text>
-        <Text dimColor>{` ctx ${ctxOf(a)}% · ${fmtTokens(a.contextTokens)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`}</Text>
+        <Text dimColor>{` ctx ${ctxOf(a)}% · ${tokOf(a)} · ≈${fmtCost(a)} · ${fmtTime(elapsed(a, at))}`}</Text>
       </Text>
     </Box>
   )
@@ -563,11 +566,23 @@ const FIELDS: Field[] = [
       })[v] ?? '',
   },
   {
+    field: 'forecast',
+    section: 'GUARD',
+    name: 'Token forecast',
+    def: 'on',
+    hint: v =>
+      ({
+        on: 'Past what runs like it usually take, a subagent is nudged to wrap up; past twice that, it hands back what it found. Same for the same call repeated with the same result. Learned from your runs, once there are ten of a kind.',
+        nudge: 'The nudge only: a subagent past its forecast, or repeating itself, is asked to wrap up, never stopped.',
+        off: 'No forecast and no nudge: only the budget, if set, stops a subagent.',
+      })[v] ?? '',
+  },
+  {
     field: 'budget',
     section: 'GUARD',
     name: 'Budget per subagent',
-    def: '2',
-    hint: v => (v === 'off' ? 'No guard: a subagent may spend without a cap.' : 'Past it, the subagent is asked to hand back what it found, then stopped if it keeps going.'),
+    def: 'off',
+    hint: v => (v === 'off' ? 'No spend cap: the forecast catches a run gone wrong.' : 'A cap on top of the forecast: past it, the subagent hands back what it found, then is stopped if it keeps going.'),
     label: v => (v === 'off' ? 'off' : `$${v}`),
   },
   {

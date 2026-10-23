@@ -22,12 +22,21 @@ export type Agent = {
   steps: number
   contextTokens: number
   contextWindow: number
+  // Tokens this run worked through: each step's prompt and reply, since its start or its last resume.
+  tokens: number
+  // What a run like it uses, fixed at its start: past it a nudge, past twice it a handover. None until the
+  // history holds enough runs like it, and none for a resumed run.
+  forecast?: number
+  // The history it is weighed against and, unless resumed or stopped, adds itself to: type · tier · fork.
+  forecastKey?: string
+  isResumed?: true
+  isNudged?: true
   costUsd: number
   // A request on a model the pricing page does not list (or before any prices): its cost is unknown.
   isUnpriced?: true
   savedUsd: number
-  // Why the guard stopped it, once it did.
-  trip?: 'budget'
+  // Why the guard stopped it, once it did: its spend, twice its forecast, or the same call over and over.
+  trip?: 'budget' | 'forecast' | 'loop'
 }
 
 export type Main = {

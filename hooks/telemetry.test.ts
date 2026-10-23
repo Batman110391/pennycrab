@@ -16,6 +16,7 @@ const row = (id: string, endedAt?: number): Agent => ({
   steps: 0,
   contextTokens: 0,
   contextWindow: 1_000_000,
+  tokens: 0,
   costUsd: 0,
   savedUsd: 0,
 })
